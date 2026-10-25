@@ -16,8 +16,11 @@ return [
     */
     'sources' => [
 
-        // Beteiligte der aktuellen Akte (Beispielklasse siehe stubs/)
-        // ['class' => \App\Mail\Recipients\AkteBeteiligteSource::class],
+        // Beteiligte der aktuellen Akte (öffnen mit 'context' => ['akte' => NR])
+        [
+            'class' => 'App\\Mail\\Recipients\\AkteBeteiligteSource',
+            'label' => 'Beteiligte der Akte',
+        ],
 
         // Adressbuch: E-Mail-Adressen der Namen (Legacy-Tabelle NamenKom)
         [
@@ -62,9 +65,13 @@ return [
     'gate' => null,
 
     // Dateien, die beim Öffnen übergeben werden dürfen (Schutz vor Pfad-Manipulation)
+    // allowed_prefixes: Liste für alle Disks oder [disk => Liste]; Disk ohne Eintrag = ganze Disk
     'attachments' => [
-        'allowed_disks'    => ['local'],
-        'allowed_prefixes' => ['akten/', 'rechnungen/'],
+        'allowed_disks'    => ['local', 'data'],
+        'allowed_prefixes' => [
+            'local' => ['akten/', 'rechnungen/'],
+            // 'data': Dokumentablage der Kanzlei (Anhänge der Dokumente, z. B. 2026/akv/files/…)
+        ],
     ],
 
     // Im Modal hochgeladene Dateien

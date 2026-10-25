@@ -29,7 +29,11 @@ class AttachmentGuard
             return null;
         }
 
+        // Liste = für alle Disks; [disk => Liste] = je Disk (fehlende Disk = ohne Einschränkung)
         $prefixes = (array) config('nfmailer.attachments.allowed_prefixes', []);
+        if (! array_is_list($prefixes)) {
+            $prefixes = (array) ($prefixes[$disk] ?? []);
+        }
         if ($prefixes && ! Str::startsWith($path, $prefixes)) {
             return null;
         }

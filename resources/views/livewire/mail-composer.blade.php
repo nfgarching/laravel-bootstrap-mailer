@@ -1,4 +1,14 @@
 <div>
+@if ($page)
+{{-- Eigenständige Seite (Route nfmailer.compose, Popup oder Tab): kein Modal;
+     nach Versand bzw. Übergabe ans Mailprogramm schließt sich das Fenster --}}
+<div class="nfm container-xl py-3" id="nfmailerPage"
+     x-data
+     x-init="$el.querySelector('.nfm-free')?.focus()"
+     x-on:nfmailer-hide.window="setTimeout(() => window.close(), 500)">
+  <div>
+    <div class="modal-content border rounded">
+@else
 <div class="modal fade nfm" id="nfmailerModal" tabindex="-1" aria-labelledby="nfmailerTitle" aria-hidden="true"
      wire:ignore.self
      x-data
@@ -7,10 +17,15 @@
      x-on:shown-bs-modal.dot="$el.querySelector('.nfm-free')?.focus()">
   <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-lg-down">
     <div class="modal-content">
+@endif
 
       <div class="modal-header">
         <h5 class="modal-title" id="nfmailerTitle">E-Mail verfassen</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+        @if ($page)
+          <button type="button" class="btn-close" aria-label="Schließen" onclick="window.close()"></button>
+        @else
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+        @endif
       </div>
 
       <div class="modal-body">
@@ -235,7 +250,15 @@
             ({{ count($to) }} An · {{ count($cc) }} CC · {{ count($bcc) }} BCC)
           @endif
         </span>
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Abbrechen</button>
+        <button type="button" class="btn btn-outline-secondary"
+                @if ($page) onclick="window.close()" @else data-bs-dismiss="modal" @endif>Abbrechen</button>
+        <button type="button" class="btn btn-outline-primary" wire:click="mailto"
+                x-on:nfmailer-mailto.window="window.location.href = $event.detail.url"
+                title="Im Standard-Mailprogramm öffnen (ohne Anhänge, ohne Protokoll)"
+                wire:loading.attr="disabled" wire:target="mailto,send,newUploads">
+          <i class="bi bi-box-arrow-up-right me-1"></i>
+          Im Mailprogramm öffnen
+        </button>
         <button type="button" class="btn btn-primary" wire:click="send"
                 wire:loading.attr="disabled" wire:target="send,newUploads">
           <span wire:loading wire:target="send" class="spinner-border spinner-border-sm me-1"></span>

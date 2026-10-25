@@ -5,6 +5,7 @@ namespace Nfgarching\Mailer\Livewire;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -25,8 +26,10 @@ use Throwable;
  *
  * Öffnen:   Livewire.dispatch('nfmailer-open', { options: {...} })
  *           $this->dispatch('nfmailer-open', options: [...])
+ * Seite:    route('nfmailer.compose', [...]) als Popup oder Tab (Query wie options)
  * Danach:   Event 'nfmailer-sent' mit { id } (ID des Protokolleintrags)
  */
+#[Layout('layout::popup')]
 class MailComposer extends Component
 {
     use WithFileUploads;
@@ -63,12 +66,37 @@ class MailComposer extends Component
 
     public ?string $notice = null;
 
+    /** true = eigenständige Seite statt Modal */
+    #[Locked]
+    public bool $page = false;
+
     // ---------------------------------------------------------------- Öffnen
 
-    #[On('nfmailer-open')]
-    public function open(array $options = []): void
+    /**
+     * Als eigenständige Seite (Route nfmailer.compose, Popup oder Tab):
+     * Optionen kommen als Query-Parameter, Arrays JSON-kodiert (wie bei x-button.dispatch).
+     */
+    public function mount(): void
     {
-        $this->reset();
+        if (! request()->routeIs('nfmailer.compose')) {
+            return;
+        }
+
+        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'attachments']))
+            ->map(fn ($v) => is_string($v) && json_validate($v) && is_array($decoded = json_decode($v, true)) ? $decoded : $v)
+            ->all();
+
+        $this->open($options);
+        $this->page = true;
+    }
+
+    /** $data: Payload von x-button.dispatch (Livewire.dispatch(..., { data: {...} })) */
+    #[On('nfmailer-open')]
+    public function open(array $options = [], array $data = []): void
+    {
+        $options = $options ?: $data;
+
+        $this->resetExcept('page');
         $this->resetValidation();
         unset($this->suggestions, $this->results);
 
@@ -386,7 +414,68 @@ class MailComposer extends Component
 
         $this->dispatch('nfmailer-sent', id: $log->id);
         $this->dispatch('nfmailer-hide');
-        $this->reset();
+        $this->resetExcept('page');
+    }
+
+    /**
+     * Übergibt Empfänger, Betreff und Text per mailto: an das Standard-Mailprogramm.
+     * Anhänge lassen sich so nicht übergeben; es wird nichts protokolliert.
+     */
+    public function mailto(): void
+    {
+        abort_unless(auth()->check(), 403);
+
+        $this->notice = null;
+        $this->addFree();
+
+        if ($this->getErrorBag()->has('freeInput')) {
+            return;
+        }
+
+        $this->validate(
+            ['to' => 'required|array|min:1'],
+            [
+                'to.required' => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
+                'to.min'      => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
+            ],
+        );
+
+        $this->dispatch('nfmailer-mailto', url: $this->mailtoUrl());
+
+        if ($this->attachments || $this->uploads) {
+            // Modal offen lassen, damit die Anhänge nicht verloren gehen
+            $this->notice = 'Anhänge werden an das Mailprogramm nicht übergeben – bitte dort von Hand anfügen.';
+
+            return;
+        }
+
+        $this->dispatch('nfmailer-hide');
+        $this->resetExcept('page');
+    }
+
+    /** mailto:-URL nach RFC 6068 (Zeilenumbrüche als CRLF) */
+    protected function mailtoUrl(): string
+    {
+        $list = fn (array $recipients) => implode(',', array_map(
+            fn ($r) => str_replace('%40', '@', rawurlencode($r['email'])),
+            $recipients,
+        ));
+
+        $body = $this->body;
+        if ($signature = config('nfmailer.signature')) {
+            $body .= "\n\n--\n" . $signature;
+        }
+
+        $params = array_filter([
+            'cc'      => $list($this->cc),
+            'bcc'     => $list($this->bcc),
+            'subject' => rawurlencode($this->subject),
+            'body'    => rawurlencode(preg_replace('/\r\n|\r|\n/', "\r\n", $body)),
+        ]);
+
+        $query = implode('&', array_map(fn ($k, $v) => $k . '=' . $v, array_keys($params), $params));
+
+        return 'mailto:' . $list($this->to) . ($query ? '?' . $query : '');
     }
 
     protected function addressList(array $recipients): array

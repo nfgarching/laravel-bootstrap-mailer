@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SentMail extends Model
 {
-    protected $table = 'nf_sent_mails';
+    protected $table = 'sent_mails';
 
     protected $guarded = [];
 

@@ -10,7 +10,7 @@ E-Mail-Versand mit komfortablem Empfänger-Modal (Livewire 3, Bootstrap 5.3).
   (`Müller, Hans <h@x.de>; info@y.de`), Backspace löscht den letzten Chip
 - Chip-Menü: in anderes Feld verschieben; eine Adresse steht nie doppelt
 - **Anhänge** (übergeben oder hochgeladen) oder wahlweise **Download-Links** mit Ablaufdatum und Abrufzähler
-- **Versandprotokoll** in `nf_sent_mails`
+- **Versandprotokoll** in `sent_mails` (Download-Links in `sent_mails_links`)
 
 ---
 

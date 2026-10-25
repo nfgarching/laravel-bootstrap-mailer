@@ -8,7 +8,7 @@ use Illuminate\Support\Str;
 
 class MailLink extends Model
 {
-    protected $table = 'nf_mail_links';
+    protected $table = 'sent_mails_links';
 
     protected $guarded = [];
 

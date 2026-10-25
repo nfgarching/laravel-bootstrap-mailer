@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('nf_sent_mails', function (Blueprint $t) {
+        Schema::create('sent_mails', function (Blueprint $t) {
             $t->id();
             $t->foreignId('user_id')->nullable()->index();
             $t->string('status', 20)->default('pending');   // pending | sent | queued | failed
@@ -28,7 +28,7 @@ return new class extends Migration
             $t->timestamps();
         });
 
-        Schema::create('nf_mail_links', function (Blueprint $t) {
+        Schema::create('sent_mails_links', function (Blueprint $t) {
             $t->id();
             $t->foreignId('sent_mail_id')->nullable()->index();
             $t->string('token', 64)->unique();
@@ -44,7 +44,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('nf_mail_links');
-        Schema::dropIfExists('nf_sent_mails');
+        Schema::dropIfExists('sent_mails_links');
+        Schema::dropIfExists('sent_mails');
     }
 };

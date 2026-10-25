@@ -19,16 +19,22 @@ return [
         // Beteiligte der aktuellen Akte (Beispielklasse siehe stubs/)
         // ['class' => \App\Mail\Recipients\AkteBeteiligteSource::class],
 
-        // Allgemeines Adressbuch (beliebiges Eloquent-Model)
+        // Adressbuch: E-Mail-Adressen der Namen (Legacy-Tabelle NamenKom)
         [
-            'class'  => ModelRecipientSource::class,
-            'label'  => 'Adressbuch',
-            'model'  => 'App\\Models\\Kontakt',
-            'email'  => 'email',
-            'name'   => ['vorname', 'nachname'],   // werden mit Leerzeichen verbunden
-            'search' => ['vorname', 'nachname', 'firma', 'email'],
-            'hint'   => 'firma',                   // optional, kleine Zusatzzeile
+            'class' => 'App\\Mail\\Recipients\\NamKomSource',
+            'label' => 'Adressbuch',
         ],
+
+        // Allgemeines Adressbuch (beliebiges Eloquent-Model)
+        // [
+        //     'class'  => ModelRecipientSource::class,
+        //     'label'  => 'Adressbuch',
+        //     'model'  => 'App\\Models\\Kontakt',
+        //     'email'  => 'email',
+        //     'name'   => ['vorname', 'nachname'],   // werden mit Leerzeichen verbunden
+        //     'search' => ['vorname', 'nachname', 'firma', 'email'],
+        //     'hint'   => 'firma',                   // optional, kleine Zusatzzeile
+        // ],
     ],
 
     'search' => [

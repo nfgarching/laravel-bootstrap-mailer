@@ -16,7 +16,7 @@ use Nfgarching\Mailer\Data\Recipient;
  * Öffnen mit:  'context' => ['akte' => $akte->id]
  *
  * Angenommenes Schema (bitte anpassen):
- *   Akte  hasMany  Beteiligter (rolle, name, firma, email, email2)
+ *   Akte  hasMany  Beteiligter (rolle, name, firma, email, email2) 
  */
 class AkteBeteiligteSource implements RecipientSource
 {

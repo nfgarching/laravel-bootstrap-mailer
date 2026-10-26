@@ -71,6 +71,22 @@ return [
         'extra_certs' => env('NFMAILER_SMIME_CHAIN'),        // Zwischenzertifikate der CA (optional)
         'encrypt'     => (bool) env('NFMAILER_SMIME_ENCRYPT', true),  // Option im Modal anbieten
         'certificates' => storage_path('app/private/nfmailer/certs'), // Zertifikate der Empfänger
+
+        // Prüfung der Empfänger-Zertifikate bei der Zertifizierungsstelle
+        'trust' => [
+            // Vertrauenskette: 'require' = nur Zertifikate einer vertrauenswürdigen CA verwenden,
+            // 'warn' = übernehmen und als „ungeprüft“ kennzeichnen, 'off' = nicht prüfen
+            'chain'        => env('NFMAILER_SMIME_CHAIN_POLICY', 'warn'),
+            'system_roots' => true,                                        // Zertifikatsspeicher des Systems nutzen
+            'roots'        => storage_path('app/private/nfmailer/roots'),  // zusätzliche Wurzeln (nfmailer:cert trust)
+
+            // Sperrstatus per OCSP (benötigt den Befehl „openssl“ und Internetzugang)
+            'ocsp'              => (bool) env('NFMAILER_SMIME_OCSP', true),
+            'check_before_send' => true,  // vor verschlüsseltem Versand erneut prüfen …
+            'cache_hours'       => 24,    // … wenn die letzte Prüfung älter ist
+            'timeout'           => 10,    // Sekunden je Abfrage
+            'openssl'           => env('NFMAILER_OPENSSL', 'openssl'),
+        ],
     ],
 
     // true = Versand über die Queue (Worker nötig)

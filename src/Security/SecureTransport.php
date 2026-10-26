@@ -109,12 +109,17 @@ class SecureTransport implements TransportInterface
         $missing = [];
 
         foreach ($envelope->getRecipients() as $address) {
-            $path = $this->certificates->path($address->getAddress());
-            $path ? $paths[] = $path : $missing[] = $address->getAddress();
+            $email = $address->getAddress();
+
+            // ggf. Sperrstatus beim Aussteller auffrischen (smime.trust.check_before_send)
+            $this->certificates->ensureFresh($email);
+
+            $path = $this->certificates->path($email);
+            $path ? $paths[] = $path : $missing[] = $email . ' (' . $this->certificates->unusableReason($email) . ')';
         }
 
         if ($missing) {
-            throw new RuntimeException('Verschlüsselung nicht möglich, kein gültiges Zertifikat für: ' . implode(', ', $missing)
+            throw new RuntimeException('Verschlüsselung nicht möglich: ' . implode(', ', $missing)
                 . '. Die Mail wurde nicht versendet.');
         }
 

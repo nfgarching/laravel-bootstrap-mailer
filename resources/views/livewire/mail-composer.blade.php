@@ -81,7 +81,7 @@
                         @if ($sec['certs'][mb_strtolower($r['email'])] ?? false)
                           <i class="bi bi-lock-fill text-success" title="Zertifikat vorhanden – verschlüsselbar"></i>
                         @else
-                          <i class="bi bi-unlock text-body-tertiary" title="Kein Zertifikat – nicht verschlüsselbar"></i>
+                          <i class="bi bi-unlock text-body-tertiary" title="Nicht verschlüsselbar – Grund siehe unten"></i>
                         @endif
                       @endif
                       <span class="dropdown">
@@ -235,7 +235,7 @@
 
                 @if ($sec['canEncrypt'] && $sec['missing'])
                   <div class="text-body-secondary mt-1">
-                    Verschlüsselung nicht möglich – kein Zertifikat für:
+                    Verschlüsselung nicht möglich für:
                     {{ implode(', ', $sec['missing']) }}
                   </div>
                 @elseif ($encrypt && $sec['encryptPossible'])

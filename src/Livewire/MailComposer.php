@@ -328,7 +328,10 @@ class MailComposer extends Component
             }
         }
 
-        $missing = array_keys(array_filter($certs, fn ($ok) => ! $ok));
+        $missing = [];
+        foreach (array_keys(array_filter($certs, fn ($ok) => ! $ok)) as $e) {
+            $missing[] = $e . ' (' . app(CertificateStore::class)->unusableReason($e) . ')';
+        }
 
         return [
             'signs'           => $signs,

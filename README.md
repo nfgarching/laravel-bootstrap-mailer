@@ -268,9 +268,46 @@ nichts übernommen. Enthält die Datei eine ganze Kette, werden nur Zertifikate
 mit E-Mail-Adresse übernommen (keine CA-Zertifikate); abgelaufene werden
 abgelehnt. Mit `--email=…` lässt sich der Import auf eine Adresse beschränken.
 
-Ob die ausstellende CA vertrauenswürdig ist, prüft der Import **nicht**. Bei
-sensiblen Mandaten den angezeigten SHA-256-Fingerabdruck kurz telefonisch mit
-dem Empfänger abgleichen.
+Bei sensiblen Mandaten zusätzlich den angezeigten SHA-256-Fingerabdruck kurz
+telefonisch mit dem Empfänger abgleichen.
+
+### Prüfung bei der Zertifizierungsstelle
+
+Beim Import und regelmäßig danach wird jedes Empfänger-Zertifikat geprüft:
+
+- **Vertrauenskette** bis zu einem Wurzelzertifikat aus dem System-Zertifikatsspeicher
+  oder aus `storage/app/private/nfmailer/roots`. Fehlende Zwischenzertifikate werden
+  aus der Mail genommen oder über die im Zertifikat genannte „CA Issuers“-Adresse geladen.
+- **Sperrstatus per OCSP** beim Aussteller. Gesperrte Zertifikate werden beim Import
+  abgelehnt und nie zum Verschlüsseln verwendet.
+
+```bash
+php artisan nfmailer:cert verify                     # alle neu prüfen
+php artisan nfmailer:cert verify mandant@example.de
+php artisan nfmailer:cert trust wurzel.pem           # Wurzel einer CA hinterlegen
+php artisan nfmailer:check --verify                  # Gesamtprüfung inkl. Nachprüfung
+```
+
+Vor jedem verschlüsselten Versand wird der Sperrstatus erneut abgefragt, wenn die
+letzte Prüfung älter als 24 Stunden ist (`smime.trust.check_before_send`,
+`cache_hours`). Ist ein Zertifikat inzwischen gesperrt, wird die Mail nicht
+versendet. Ist der OCSP-Dienst nicht erreichbar, gilt der Status als „unbekannt“
+und das Zertifikat bleibt verwendbar.
+
+Einstellungen in `smime.trust`:
+
+| Schlüssel | Bedeutung |
+|-----------|-----------|
+| `chain` (`NFMAILER_SMIME_CHAIN_POLICY`) | `warn` (Standard): Zertifikate ohne vertrauenswürdige Kette werden übernommen und als „Kette ?“ markiert · `require`: nur Zertifikate einer vertrauenswürdigen CA · `off` |
+| `ocsp` (`NFMAILER_SMIME_OCSP`) | Sperrprüfung an/aus |
+| `roots` | Verzeichnis für zusätzliche Wurzelzertifikate |
+| `openssl` (`NFMAILER_OPENSSL`) | Pfad zum `openssl`-Befehl |
+
+Voraussetzungen: der Befehl `openssl` (im Dockerfile ggf. `apt-get install -y openssl`)
+und ausgehender HTTP-Zugang zu den OCSP-Diensten der CAs. Wurzelzertifikate von
+S/MIME-CAs fehlen manchmal im System-Speicher; dann zeigt der Import „Kette ?“.
+In dem Fall die Wurzel von der Website der CA laden, den Fingerabdruck dort
+abgleichen und mit `nfmailer:cert trust` hinterlegen.
 
 Im Modal zeigt ein Schloss an jedem Empfänger, ob ein Zertifikat vorliegt; der
 Schalter „Verschlüsseln“ ist nur aktiv, wenn alle eins haben. Fehlt beim

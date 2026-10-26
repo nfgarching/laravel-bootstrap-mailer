@@ -7,30 +7,123 @@ use RuntimeException;
 /**
  * Ablage der S/MIME-Zertifikate von Empfängern (öffentliche Schlüssel).
  *
- * Je Adresse eine PEM-Datei im konfigurierten Verzeichnis. Zertifikate sind
- * nicht geheim; geheim ist nur der eigene private Schlüssel (siehe Config smime.key).
+ * Je Adresse im konfigurierten Verzeichnis:
+ *   <adresse>.pem          Zertifikat
+ *   <adresse>.chain        Zwischenzertifikate der CA (für Ketten- und OCSP-Prüfung)
+ *   <adresse>.status.json  Ergebnis der letzten Prüfung (Kette, Sperrstatus)
+ *
+ * Zertifikate sind nicht geheim; geheim ist nur der eigene private Schlüssel.
  */
 class CertificateStore
 {
-    public function __construct(protected string $directory) {}
+    /**
+     * @param array{chain?: string, check_before_send?: bool, cache_hours?: int} $policy
+     *        chain: 'require' = nur Zertifikate mit geprüfter Kette, 'warn' = übernehmen mit Hinweis, 'off'
+     */
+    public function __construct(
+        protected string $directory,
+        protected ?CertificateVerifier $verifier = null,
+        protected array $policy = [],
+    ) {}
 
     public static function fromConfig(): self
     {
-        return new self((string) config('nfmailer.smime.certificates', storage_path('app/private/nfmailer/certs')));
+        $trust = (array) config('nfmailer.smime.trust', []);
+
+        return new self(
+            (string) config('nfmailer.smime.certificates', storage_path('app/private/nfmailer/certs')),
+            ($trust['chain'] ?? 'warn') === 'off' && ! ($trust['ocsp'] ?? true) ? null : CertificateVerifier::fromConfig(),
+            $trust,
+        );
     }
 
-    /** Pfad zum gültigen (nicht abgelaufenen) Zertifikat oder null. */
+    /**
+     * Pfad zum verwendbaren Zertifikat oder null:
+     * nicht abgelaufen, nicht gesperrt, und – bei chain=require – mit geprüfter Kette.
+     */
     public function path(string $email): ?string
+    {
+        return $this->unusableReason($email) === null ? $this->file($email) : null;
+    }
+
+    /** Warum das Zertifikat einer Adresse nicht verwendbar ist, oder null */
+    public function unusableReason(string $email): ?string
     {
         $file = $this->file($email);
 
         if (! is_file($file)) {
-            return null;
+            return 'kein Zertifikat';
         }
 
         $info = $this->inspect((string) file_get_contents($file));
 
-        return $info && ! $info['expired'] ? $file : null;
+        if (! $info) {
+            return 'Zertifikat unlesbar';
+        }
+        if ($info['expired']) {
+            return 'abgelaufen am ' . $info['valid_to'];
+        }
+
+        $status = $this->status($email);
+
+        if (($status['ocsp_status'] ?? null) === CertificateVerifier::REVOKED) {
+            return 'von der Zertifizierungsstelle gesperrt';
+        }
+        if (($this->policy['chain'] ?? 'warn') === 'require' && ! ($status['chain_ok'] ?? false)) {
+            return 'Aussteller nicht vertrauenswürdig';
+        }
+
+        return null;
+    }
+
+    /**
+     * Prüft vor dem Versand erneut beim Aussteller, wenn die letzte Prüfung älter
+     * als cache_hours ist (smime.trust.check_before_send).
+     */
+    public function ensureFresh(string $email): void
+    {
+        if (! $this->verifier || ! ($this->policy['check_before_send'] ?? true) || ! is_file($this->file($email))) {
+            return;
+        }
+
+        $age = time() - (int) ($this->status($email)['checked_at'] ?? 0);
+
+        if ($age > 3600 * (int) ($this->policy['cache_hours'] ?? 24)) {
+            $this->verify($email);
+        }
+    }
+
+    /**
+     * Kette und Sperrstatus jetzt prüfen und Ergebnis speichern.
+     *
+     * @return array{chain_ok: bool, chain_message: string, ocsp_status: string, ocsp_message: string, checked_at: int}|null
+     */
+    public function verify(string $email): ?array
+    {
+        $file = $this->file($email);
+
+        if (! $this->verifier || ! is_file($file)) {
+            return null;
+        }
+
+        $pem = (string) file_get_contents($file);
+        $chainFile = $this->chainFile($email);
+        $intermediates = is_file($chainFile) ? self::extract((string) file_get_contents($chainFile)) : [];
+
+        $status = $this->check($pem, $intermediates);
+        $this->writeChain($email, $status['intermediates']);
+        unset($status['intermediates']);
+        $this->writeStatus($email, $status);
+
+        return $status;
+    }
+
+    /** Gespeichertes Prüfergebnis einer Adresse */
+    public function status(string $email): array
+    {
+        $f = $this->statusFile($email);
+
+        return is_file($f) ? (array) json_decode((string) file_get_contents($f), true) : [];
     }
 
     public function has(string $email): bool
@@ -56,14 +149,24 @@ class CertificateStore
      * Übernommen werden nur Zertifikate mit E-Mail-Adresse (also keine CA-Zertifikate),
      * jeweils unter jeder enthaltenen Adresse.
      *
-     * @return list<array{emails: list<string>, subject: string, issuer: string, valid_to: string, fingerprint: string}>
+     * Ist eine Prüfung konfiguriert (smime.trust), werden Kette und Sperrstatus beim
+     * Aussteller geprüft: gesperrte Zertifikate werden immer abgelehnt, solche ohne
+     * vertrauenswürdige Kette nur bei chain=require.
+     *
+     * @return list<array{emails: list<string>, subject: string, issuer: string, valid_to: string, fingerprint: string, status: ?array}>
      */
     public function import(string $contents, ?string $onlyEmail = null): array
     {
         $candidates = [];
         $expired = [];
+        $rejected = [];
 
-        foreach (self::extract($contents) as $pem) {
+        $all = self::extract($contents);
+        $intermediates = $this->verifier
+            ? array_values(array_filter($all, fn ($c) => $this->verifier->isCa($c)))
+            : [];
+
+        foreach ($all as $pem) {
             $info = $this->inspect($pem);
             if (! $info || ! $info['emails']) {
                 continue;   // CA-Zertifikat o. Ä.
@@ -83,11 +186,26 @@ class CertificateStore
                 continue;
             }
 
-            $candidates[$info['fingerprint']] = ['pem' => $pem, 'emails' => $emails] + $info;
+            $status = $this->verifier ? $this->check($pem, $intermediates) : null;
+
+            if ($status && $status['ocsp_status'] === CertificateVerifier::REVOKED) {
+                $rejected[] = implode(', ', $emails) . ': ' . $status['ocsp_message'];
+
+                continue;
+            }
+            if ($status && ! $status['chain_ok'] && ($this->policy['chain'] ?? 'warn') === 'require') {
+                $rejected[] = implode(', ', $emails) . ': ' . $status['chain_message']
+                    . ' (Wurzelzertifikat mit „nfmailer:cert trust“ hinterlegen?)';
+
+                continue;
+            }
+
+            $candidates[$info['fingerprint']] = ['pem' => $pem, 'emails' => $emails, 'status' => $status] + $info;
         }
 
         if (! $candidates) {
             throw new RuntimeException(match (true) {
+                (bool) $rejected    => 'Nicht übernommen – ' . implode('; ', $rejected),
                 (bool) $expired     => 'Nur abgelaufene Zertifikate gefunden: ' . implode('; ', $expired),
                 $onlyEmail !== null => "Kein Zertifikat für {$onlyEmail} in der Datei.",
                 default             => 'Kein Zertifikat mit E-Mail-Adresse in der Datei gefunden.',
@@ -100,10 +218,18 @@ class CertificateStore
 
         $result = [];
         foreach ($candidates as $c) {
+            $status = $c['status'];
+            $chain = $status['intermediates'] ?? [];
+            unset($status['intermediates']);
+
             foreach ($c['emails'] as $email) {
                 file_put_contents($this->file($email), $c['pem']);
+                $this->writeChain($email, $chain);
+                $status ? $this->writeStatus($email, $status) : @unlink($this->statusFile($email));
             }
-            $result[] = array_intersect_key($c, array_flip(['emails', 'subject', 'issuer', 'valid_to', 'fingerprint']));
+
+            $result[] = array_intersect_key($c, array_flip(['emails', 'subject', 'issuer', 'valid_to', 'fingerprint']))
+                + ['status' => $status];
         }
 
         return $result;
@@ -171,47 +297,118 @@ class CertificateStore
     {
         $in = tempnam(sys_get_temp_dir(), 'nfm');
         $out = tempnam(sys_get_temp_dir(), 'nfm');
+        $p7 = tempnam(sys_get_temp_dir(), 'nfm');
 
         try {
             // Zeilenenden vereinheitlichen (gespeicherte .eml haben mal LF, mal CRLF)
             file_put_contents($in, preg_replace("/\r?\n/", "\r\n", $mail));
 
-            $ok = openssl_pkcs7_verify($in, PKCS7_NOVERIFY, $out);
+            $ok = openssl_pkcs7_verify($in, PKCS7_NOVERIFY, $out, [], null, null, $p7);
 
             if ($ok !== true) {
-                throw new RuntimeException($ok === false
-                    ? 'Die Signatur der E-Mail ist ungültig (Mail verändert?). Zertifikat nicht übernommen.'
-                    : 'Die E-Mail enthält keine lesbare S/MIME-Signatur: ' . openssl_error_string());
+                $errors = '';
+                while ($e = openssl_error_string()) {
+                    $errors .= $e . ' ';
+                }
+
+                throw new RuntimeException(match (true) {
+                    str_contains($errors, 'signer certificate not found')
+                        => 'Die E-Mail wurde ohne mitgeschicktes Zertifikat signiert. Bitte den Absender um das Zertifikat als .cer-Datei bitten.',
+                    $ok === false
+                        => 'Die Signatur der E-Mail ist ungültig (Mail verändert?). Zertifikat nicht übernommen.',
+                    default
+                        => 'Die E-Mail enthält keine lesbare S/MIME-Signatur: ' . trim($errors),
+                });
             }
 
             preg_match_all('/-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----/s', (string) file_get_contents($out), $m);
+            $signers = array_map(fn ($c) => $c . "\n", $m[0]);
 
-            return array_map(fn ($c) => $c . "\n", $m[0]);
+            // Mitgeschickte Zwischenzertifikate (für die Kettenprüfung) anhängen
+            $all = self::fromPkcs7Pem((string) file_get_contents($p7));
+            $norm = fn ($c) => preg_replace('/\s+/', '', $c);
+            $known = array_map($norm, $signers);
+            foreach ($all as $c) {
+                if (! in_array($norm($c), $known, true)) {
+                    $signers[] = $c;
+                    $known[] = $norm($c);
+                }
+            }
+
+            return $signers;
         } finally {
             @unlink($in);
             @unlink($out);
+            @unlink($p7);
         }
     }
 
     public function remove(string $email): bool
     {
         $file = $this->file($email);
+        @unlink($this->chainFile($email));
+        @unlink($this->statusFile($email));
 
         return is_file($file) && unlink($file);
     }
 
-    /** @return list<array{email: string, subject: string, valid_to: string, expired: bool}> */
+    /** @return list<array{email: string, subject: string, valid_to: string, expired: bool, status: array}> */
     public function all(): array
     {
         $out = [];
 
         foreach (glob(rtrim($this->directory, '/') . '/*.pem') ?: [] as $file) {
+            $email = basename($file, '.pem');
             if ($info = $this->inspect((string) file_get_contents($file))) {
-                $out[] = ['email' => basename($file, '.pem')] + $info;
+                $out[] = ['email' => $email] + $info + ['status' => $this->status($email)];
             }
         }
 
         return $out;
+    }
+
+    public function verifier(): ?CertificateVerifier
+    {
+        return $this->verifier;
+    }
+
+    /** @param list<string> $intermediates */
+    protected function check(string $pem, array $intermediates): array
+    {
+        $chain = $this->verifier->chain($pem, $intermediates);
+        $ocsp = $this->verifier->ocsp($pem, $chain['intermediates']);
+
+        return [
+            'chain_ok'      => $chain['ok'],
+            'chain_message' => $chain['message'],
+            'ocsp_status'   => $ocsp['status'],
+            'ocsp_message'  => $ocsp['message'],
+            'checked_at'    => $ocsp['checked_at'],
+            'intermediates' => $chain['intermediates'],
+        ];
+    }
+
+    /** @param list<string> $intermediates */
+    protected function writeChain(string $email, array $intermediates): void
+    {
+        $intermediates
+            ? file_put_contents($this->chainFile($email), implode('', $intermediates))
+            : @unlink($this->chainFile($email));
+    }
+
+    protected function writeStatus(string $email, array $status): void
+    {
+        file_put_contents($this->statusFile($email), json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    }
+
+    protected function chainFile(string $email): string
+    {
+        return substr($this->file($email), 0, -4) . '.chain';
+    }
+
+    protected function statusFile(string $email): string
+    {
+        return substr($this->file($email), 0, -4) . '.status.json';
     }
 
     /**

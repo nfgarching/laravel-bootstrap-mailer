@@ -16,7 +16,9 @@ use Throwable;
  */
 class CheckCommand extends Command
 {
-    protected $signature = 'nfmailer:check {--dkim-selector=google : DKIM-Selektor der Absenderdomain}';
+    protected $signature = 'nfmailer:check
+        {--dkim-selector=google : DKIM-Selektor der Absenderdomain}
+        {--verify : Empfänger-Zertifikate jetzt bei den Zertifizierungsstellen nachprüfen}';
 
     protected $description = 'Sicherheit des E-Mail-Versands prüfen (TLS, S/MIME, Links, DNS)';
 
@@ -100,14 +102,49 @@ class CheckCommand extends Command
         }
 
         if (! empty($c['encrypt'])) {
-            $all = $store->all();
-            $expired = array_filter($all, fn ($x) => $x['expired']);
-            $this->line('  Empfänger-Zertifikate: ' . count($all) . (count($expired) ? ' (davon ' . count($expired) . ' abgelaufen)' : ''));
+            $this->recipients($store);
+        }
+    }
 
-            if ($expired) {
-                $this->warn_('Abgelaufen: ' . implode(', ', array_column($expired, 'email')));
+    protected function recipients(CertificateStore $store): void
+    {
+        $verifier = $store->verifier();
+        $trust = (array) config('nfmailer.smime.trust', []);
+
+        if ($verifier) {
+            ($trust['ocsp'] ?? true) && ! $verifier->openssl()
+                ? $this->bad('Befehl „openssl“ fehlt – keine OCSP-Sperrprüfung möglich (im Dockerfile: apt-get install -y openssl).')
+                : $this->good('Sperrprüfung per OCSP ' . (($trust['ocsp'] ?? true) ? 'aktiv' : 'abgeschaltet') . ', Kettenprüfung: ' . ($trust['chain'] ?? 'warn') . '.');
+
+            $roots = count(glob(rtrim((string) ($trust['roots'] ?? ''), '/') . '/*.pem') ?: []);
+            $this->line('  Vertrauensspeicher: ' . (($trust['system_roots'] ?? true) ? 'System' : '–') . " + {$roots} eigene Wurzel(n)");
+        } else {
+            $this->warn_('Empfänger-Zertifikate werden nicht bei der CA geprüft (smime.trust).');
+        }
+
+        if ($this->option('verify') && $verifier) {
+            $this->line('  Prüfe alle Empfänger-Zertifikate bei den Zertifizierungsstellen …');
+            foreach ($store->all() as $c) {
+                $store->verify($c['email']);
             }
         }
+
+        $all = $store->all();
+        $this->line('  Empfänger-Zertifikate: ' . count($all));
+
+        $expired = array_column(array_filter($all, fn ($x) => $x['expired']), 'email');
+        $revoked = array_column(array_filter($all, fn ($x) => ($x['status']['ocsp_status'] ?? null) === 'revoked'), 'email');
+        $untrusted = array_column(array_filter($all, fn ($x) => $x['status'] && ! $x['status']['chain_ok']), 'email');
+        $unchecked = array_column(array_filter($all, fn ($x) => ! $x['status']), 'email');
+        $stale = array_column(array_filter($all, fn ($x) => $x['status']
+            && time() - (int) $x['status']['checked_at'] > 86400 * 30), 'email');
+
+        $expired && $this->warn_('Abgelaufen: ' . implode(', ', $expired));
+        $revoked && $this->bad('GESPERRT (werden nicht verwendet): ' . implode(', ', $revoked));
+        $untrusted && $this->warn_('Aussteller nicht vertrauenswürdig: ' . implode(', ', $untrusted)
+            . (($trust['chain'] ?? 'warn') === 'require' ? ' (werden nicht verwendet)' : ''));
+        $verifier && $unchecked && $this->warn_('Noch nie geprüft: ' . implode(', ', $unchecked) . ' → nfmailer:check --verify');
+        $stale && $this->warn_('Letzte Prüfung älter als 30 Tage: ' . implode(', ', $stale) . ' → nfmailer:check --verify');
     }
 
     protected function smimeSigning(array $c, string $from, CertificateStore $store): void

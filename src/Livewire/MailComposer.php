@@ -15,6 +15,7 @@ use Nfgarching\Mailer\Data\Recipient;
 use Nfgarching\Mailer\Mail\ComposedMail;
 use Nfgarching\Mailer\Models\MailLink;
 use Nfgarching\Mailer\Models\SentMail;
+use Nfgarching\Mailer\Security\CertificateStore;
 use Nfgarching\Mailer\Sources\RecipientResolver;
 use Nfgarching\Mailer\Support\AddressParser;
 use Nfgarching\Mailer\Support\AttachmentGuard;
@@ -64,6 +65,18 @@ class MailComposer extends Component
 
     public bool $asLinks = false;
 
+    /** Download-Links mit PIN schützen */
+    public bool $usePin = true;
+
+    /** PIN zusätzlich in einer zweiten E-Mail senden */
+    public bool $pinByMail = false;
+
+    /** S/MIME-Verschlüsselung (nur wirksam, wenn alle Empfänger ein Zertifikat haben) */
+    public bool $encrypt = true;
+
+    /** Ergebnis nach Versand mit PIN (Modal bleibt offen, damit die PIN sichtbar ist) */
+    public ?array $result = null;
+
     public ?string $notice = null;
 
     /** true = eigenständige Seite statt Modal */
@@ -82,7 +95,7 @@ class MailComposer extends Component
             return;
         }
 
-        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'attachments']))
+        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'attachments']))
             ->map(fn ($v) => is_string($v) && json_validate($v) && is_array($decoded = json_decode($v, true)) ? $decoded : $v)
             ->all();
 
@@ -104,6 +117,8 @@ class MailComposer extends Component
         $this->subject = (string) ($options['subject'] ?? '');
         $this->body    = (string) ($options['body'] ?? '');
         $this->asLinks = (bool) ($options['links'] ?? config('nfmailer.links.default', false));
+        $this->usePin  = (bool) ($options['pin'] ?? config('nfmailer.links.pin_default', true));
+        $this->encrypt = (bool) ($options['encrypt'] ?? true);
 
         foreach (array_keys(self::FIELDS) as $field) {
             foreach ((array) ($options[$field] ?? []) as $value) {
@@ -286,6 +301,52 @@ class MailComposer extends Component
         $this->picked = [];
     }
 
+    // ---------------------------------------------------------------- Sicherheit
+
+    /**
+     * Stand von Signatur und Verschlüsselung für die aktuelle Empfängerliste.
+     *
+     * @return array{signs: bool, canEncrypt: bool, encryptPossible: bool, missing: list<string>, certs: array<string, bool>}
+     */
+    #[Computed]
+    public function security(): array
+    {
+        $smime = (array) config('nfmailer.smime', []);
+        $signs = ! empty($smime['certificate']) && ! empty($smime['key']);
+        $canEncrypt = (bool) ($smime['encrypt'] ?? false);
+
+        $emails = array_map(
+            fn ($r) => mb_strtolower($r['email']),
+            [...$this->to, ...$this->cc, ...$this->bcc],
+        );
+
+        $certs = [];
+        if ($canEncrypt) {
+            $store = app(CertificateStore::class);
+            foreach (array_unique($emails) as $e) {
+                $certs[$e] = $store->has($e);
+            }
+        }
+
+        $missing = array_keys(array_filter($certs, fn ($ok) => ! $ok));
+
+        return [
+            'signs'           => $signs,
+            'canEncrypt'      => $canEncrypt,
+            'encryptPossible' => $canEncrypt && $emails && ! $missing,
+            'missing'         => $missing,
+            'certs'           => $certs,
+        ];
+    }
+
+    /** Neue Mail nach Versand mit PIN-Anzeige */
+    public function closeResult(): void
+    {
+        $this->result = null;
+        $this->dispatch('nfmailer-hide');
+        $this->resetExcept('page');
+    }
+
     // ---------------------------------------------------------------- Anhänge
 
     public function updatedNewUploads(): void
@@ -351,13 +412,17 @@ class MailComposer extends Component
             ];
         }
 
-        $mailer = config('nfmailer.mailer');
-        $queue  = (bool) config('nfmailer.queue', false);
+        $inner    = config('nfmailer.mailer') ?: config('mail.default');
+        $queue    = (bool) config('nfmailer.queue', false);
+        unset($this->security);
+        $security = $this->security;
+        $encrypt  = $this->encrypt && $security['encryptPossible'];
+        $pin      = ($this->asLinks && $files && $this->usePin) ? MailLink::generatePin() : null;
 
         $log = SentMail::create([
             'user_id'     => auth()->id(),
             'status'      => 'pending',
-            'mailer'      => $mailer,
+            'mailer'      => $inner,
             'subject'     => $this->subject,
             'body'        => $this->body,
             'to'          => $this->to,
@@ -365,6 +430,9 @@ class MailComposer extends Component
             'bcc'         => $this->bcc,
             'attachments' => $files,
             'as_links'    => $this->asLinks && $files,
+            'signed'      => $security['signs'],
+            'encrypted'   => $encrypt,
+            'pin'         => $pin,
             'context'     => $this->context,
             'context_key' => SentMail::contextKey($this->context),
         ]);
@@ -372,7 +440,7 @@ class MailComposer extends Component
         $links = [];
         if ($this->asLinks && $files) {
             foreach ($files as $f) {
-                $link = MailLink::issue($f, $log->id);
+                $link = MailLink::issue($f, $log->id, $pin);
                 $links[] = [
                     'name'    => $f['name'],
                     'url'     => $link->url(),
@@ -387,6 +455,8 @@ class MailComposer extends Component
             files: $links ? [] : $files,
             links: $links,
             signature: config('nfmailer.signature') ?: null,
+            encrypt: $encrypt,
+            pinNote: $pin ? 'Zum Abruf benötigen Sie eine PIN, die Sie getrennt von dieser E-Mail erhalten.' : null,
         ))
             ->to($this->addressList($this->to))
             ->cc($this->addressList($this->cc))
@@ -394,10 +464,10 @@ class MailComposer extends Component
 
         try {
             if ($queue) {
-                Mail::mailer($mailer)->queue($mail);
+                Mail::mailer('nfmailer')->queue($mail);
                 $log->update(['status' => 'queued']);
             } else {
-                $sent = Mail::mailer($mailer)->send($mail);
+                $sent = Mail::mailer('nfmailer')->send($mail);
                 $log->update([
                     'status'     => 'sent',
                     'sent_at'    => now(),
@@ -412,9 +482,55 @@ class MailComposer extends Component
             return;
         }
 
+        $pinMailed = false;
+        if ($pin && $this->pinByMail) {
+            $pinMailed = $this->sendPinMail($pin);
+        }
+
         $this->dispatch('nfmailer-sent', id: $log->id);
+
+        if ($pin) {
+            // Modal offen lassen: Die PIN muss dem Empfänger mitgeteilt werden
+            $this->result = [
+                'id'        => $log->id,
+                'pin'       => $pin,
+                'pinMailed' => $pinMailed,
+                'signed'    => $security['signs'],
+                'encrypted' => $encrypt,
+            ];
+
+            return;
+        }
+
         $this->dispatch('nfmailer-hide');
         $this->resetExcept('page');
+    }
+
+    /** Zweite E-Mail nur mit der PIN (getrennter Versand, ohne Bezug zum Inhalt im Betreff) */
+    protected function sendPinMail(string $pin): bool
+    {
+        $text = "Guten Tag,\n\nfür die Dokumente, die ich Ihnen soeben in einer separaten E-Mail zum Download "
+            . "bereitgestellt habe, lautet die PIN:\n\n    {$pin}\n\n"
+            . 'Die PIN ist für alle Dokumente dieser E-Mail gültig.'
+            . (($sig = config('nfmailer.signature')) ? "\n\n--\n{$sig}" : '');
+
+        try {
+            // Symfony\Address verlangt einen String als Namen (null führt zu TypeError)
+            $list = fn (array $rs) => array_map(fn ($r) => ['email' => $r['email'], 'name' => (string) ($r['name'] ?? '')], $rs);
+
+            Mail::mailer('nfmailer')->raw($text, function ($m) use ($list) {
+                $m->to($list($this->to))
+                    ->cc($list($this->cc))
+                    ->bcc($list($this->bcc))
+                    ->subject('PIN für Ihren Dokumentenabruf');
+            });
+
+            return true;
+        } catch (Throwable $e) {
+            report($e);
+
+            return false;
+        }
     }
 
     /**

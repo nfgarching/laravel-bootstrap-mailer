@@ -3,14 +3,21 @@
 namespace Nfgarching\Mailer\Mail;
 
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Mail\Mailables\Headers;
 use Illuminate\Queue\SerializesModels;
+use Nfgarching\Mailer\Security\SecureTransport;
 
-class ComposedMail extends Mailable
+/**
+ * ShouldBeEncrypted: Beim Versand über die Queue liegt der Mailinhalt
+ * verschlüsselt in der Jobs-Tabelle statt im Klartext.
+ */
+class ComposedMail extends Mailable implements ShouldBeEncrypted
 {
     use Queueable, SerializesModels;
 
@@ -24,6 +31,8 @@ class ComposedMail extends Mailable
         public array $files = [],
         public array $links = [],
         public ?string $signature = null,
+        public bool $encrypt = false,
+        public ?string $pinNote = null,
     ) {}
 
     public function envelope(): Envelope
@@ -33,6 +42,12 @@ class ComposedMail extends Mailable
             : [];
 
         return new Envelope(subject: $this->mailSubject, replyTo: $replyTo);
+    }
+
+    /** Steuer-Header für den SecureTransport (wird dort vor dem Versand entfernt) */
+    public function headers(): Headers
+    {
+        return new Headers(text: $this->encrypt ? [SecureTransport::ENCRYPT_HEADER => '1'] : []);
     }
 
     public function content(): Content

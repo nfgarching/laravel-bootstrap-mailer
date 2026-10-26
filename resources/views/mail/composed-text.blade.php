@@ -8,6 +8,9 @@ Dokumente zum Download:
 @if ($links[0]['expires'] ?? null)
 (abrufbar bis {{ $links[0]['expires'] }})
 @endif
+@if ($pinNote)
+{!! $pinNote !!}
+@endif
 @endif
 @if ($signature)
 

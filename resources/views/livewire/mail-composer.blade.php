@@ -33,6 +33,32 @@
           <div class="alert alert-danger py-2">{{ $notice }}</div>
         @endif
 
+        @php $sec = $this->security; @endphp
+
+        @if ($result)
+          {{-- ============================================ Nach Versand mit PIN --}}
+          <div class="text-center py-4 mx-auto" style="max-width: 30rem">
+            <i class="bi bi-check-circle text-success display-5"></i>
+            <h5 class="mt-2">E-Mail versandt</h5>
+            <p class="text-body-secondary small mb-3">
+              @if ($result['signed']) <span class="badge text-bg-light border"><i class="bi bi-patch-check"></i> signiert</span> @endif
+              @if ($result['encrypted']) <span class="badge text-bg-light border"><i class="bi bi-lock-fill"></i> verschlüsselt</span> @endif
+            </p>
+            <div class="border rounded p-3 bg-body-tertiary">
+              <div class="small text-body-secondary">PIN für die Download-Links</div>
+              <div class="fs-2 fw-bold font-monospace user-select-all" style="letter-spacing: .3rem">{{ $result['pin'] }}</div>
+              <div class="small mt-1">
+                @if ($result['pinMailed'])
+                  Die PIN wurde zusätzlich in einer separaten E-Mail versandt.
+                @else
+                  Bitte teilen Sie die PIN dem Empfänger telefonisch oder per SMS mit.
+                @endif
+              </div>
+            </div>
+            <p class="small text-body-secondary mt-3 mb-0">Die PIN bleibt im Versandprotokoll (verschlüsselt) abrufbar.</p>
+          </div>
+        @else
+
         <div class="row g-3">
 
           {{-- ============================================ Linke Spalte: Mail --}}
@@ -51,6 +77,13 @@
                     <span class="nfm-chip badge rounded-pill d-inline-flex align-items-center gap-1"
                           title="{{ $r['email'] }}{{ $r['hint'] ? ' · '.$r['hint'] : '' }}"
                           wire:key="chip-{{ $field }}-{{ $r['email'] }}">
+                      @if ($sec['canEncrypt'])
+                        @if ($sec['certs'][mb_strtolower($r['email'])] ?? false)
+                          <i class="bi bi-lock-fill text-success" title="Zertifikat vorhanden – verschlüsselbar"></i>
+                        @else
+                          <i class="bi bi-unlock text-body-tertiary" title="Kein Zertifikat – nicht verschlüsselbar"></i>
+                        @endif
+                      @endif
                       <span class="dropdown">
                         <button type="button" class="btn btn-link p-0 text-reset text-decoration-none nfm-chip-text"
                                 data-bs-toggle="dropdown" aria-expanded="false">
@@ -155,10 +188,61 @@
                     @endif
                   </label>
                 </div>
+
+                @if ($asLinks)
+                  <div class="ms-4 mt-1">
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" role="switch" id="nfmUsePin" wire:model.live="usePin">
+                      <label class="form-check-label small" for="nfmUsePin">Download mit PIN schützen</label>
+                    </div>
+                    @if ($usePin)
+                      <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="nfmPinByMail" wire:model="pinByMail">
+                        <label class="form-check-label small" for="nfmPinByMail">
+                          PIN zusätzlich per separater E-Mail senden
+                          <span class="text-body-secondary">(sonst telefonisch/SMS mitteilen)</span>
+                        </label>
+                      </div>
+                    @endif
+                  </div>
+                @endif
               @else
                 <div class="small text-body-tertiary">Keine Anhänge.</div>
               @endif
             </div>
+
+            {{-- Sicherheit --}}
+            @if ($sec['signs'] || $sec['canEncrypt'])
+              <div class="border rounded p-2 mt-2 small">
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  @if ($sec['signs'])
+                    <span title="Die E-Mail wird mit dem S/MIME-Zertifikat der Kanzlei signiert">
+                      <i class="bi bi-patch-check text-success"></i> Wird signiert
+                    </span>
+                  @endif
+
+                  @if ($sec['canEncrypt'])
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" role="switch" id="nfmEncrypt"
+                             wire:model.live="encrypt" @disabled(! $sec['encryptPossible'])>
+                      <label class="form-check-label" for="nfmEncrypt">
+                        <i class="bi {{ $encrypt && $sec['encryptPossible'] ? 'bi-lock-fill text-success' : 'bi-unlock' }}"></i>
+                        Verschlüsseln (S/MIME)
+                      </label>
+                    </div>
+                  @endif
+                </div>
+
+                @if ($sec['canEncrypt'] && $sec['missing'])
+                  <div class="text-body-secondary mt-1">
+                    Verschlüsselung nicht möglich – kein Zertifikat für:
+                    {{ implode(', ', $sec['missing']) }}
+                  </div>
+                @elseif ($encrypt && $sec['encryptPossible'])
+                  <div class="text-body-secondary mt-1">Hinweis: Der Betreff wird nicht verschlüsselt.</div>
+                @endif
+              </div>
+            @endif
           </div>
 
           {{-- ============================================ Rechte Spalte: Auswahl --}}
@@ -240,9 +324,13 @@
             </div>
           </div>
         </div>
+        @endif
       </div>
 
       <div class="modal-footer">
+        @if ($result)
+          <button type="button" class="btn btn-primary ms-auto" wire:click="closeResult">Schließen</button>
+        @else
         @php $total = count($to) + count($cc) + count($bcc); @endphp
         <span class="small text-body-secondary me-auto">
           {{ $total }} Empfänger
@@ -264,6 +352,7 @@
           <span wire:loading wire:target="send" class="spinner-border spinner-border-sm me-1"></span>
           Senden
         </button>
+        @endif
       </div>
 
     </div>

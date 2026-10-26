@@ -10,9 +10,18 @@ Route::middleware(['web', 'auth'])
     ->get('compose', MailComposer::class)
     ->name('nfmailer.compose');
 
-// Öffentlich: Empfänger haben kein Login. Schutz über 48-stelliges Zufallstoken + Ablaufdatum.
-Route::middleware(['web', 'throttle:30,1'])
+// Öffentlich: Empfänger haben kein Login. Schutz über 48-stelliges Zufallstoken
+// (nur als Hash gespeichert), Ablaufdatum, optionale PIN und Rate-Limit.
+Route::middleware('web')
     ->prefix(config('nfmailer.route_prefix', 'nfmailer'))
-    ->get('d/{token}', DownloadController::class)
-    ->where('token', '[A-Za-z0-9]{48}')
-    ->name('nfmailer.download');
+    ->group(function () {
+        Route::get('d/{token}', [DownloadController::class, 'show'])
+            ->where('token', '[A-Za-z0-9]{48}')
+            ->middleware('throttle:30,1')
+            ->name('nfmailer.download');
+
+        Route::post('d/{token}', [DownloadController::class, 'download'])
+            ->where('token', '[A-Za-z0-9]{48}')
+            ->middleware('throttle:10,1')
+            ->name('nfmailer.download.file');
+    });

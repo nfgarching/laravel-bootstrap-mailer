@@ -12,15 +12,26 @@ class SentMail extends Model
 
     protected $guarded = [];
 
+    /**
+     * Inhalt und Empfänger liegen verschlüsselt in der Datenbank (APP_KEY).
+     * Folge: keine SQL-Suche über Betreff/Text/Empfänger; Filtern über context_key.
+     */
     protected $casts = [
-        'to'          => 'array',
-        'cc'          => 'array',
-        'bcc'         => 'array',
-        'attachments' => 'array',
+        'subject'     => 'encrypted',
+        'body'        => 'encrypted',
+        'to'          => 'encrypted:array',
+        'cc'          => 'encrypted:array',
+        'bcc'         => 'encrypted:array',
+        'attachments' => 'encrypted:array',
+        'pin'         => 'encrypted',
         'context'     => 'array',
         'as_links'    => 'boolean',
+        'signed'      => 'boolean',
+        'encrypted'   => 'boolean',
         'sent_at'     => 'datetime',
     ];
+
+    protected $hidden = ['pin'];
 
     public function links(): HasMany
     {

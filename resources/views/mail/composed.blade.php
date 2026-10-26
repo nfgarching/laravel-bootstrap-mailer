@@ -20,6 +20,9 @@
         @if ($links[0]['expires'] ?? null)
           <div style="margin-top:8px;font-size:12px;color:#57606a;">Die Links sind bis {{ $links[0]['expires'] }} abrufbar.</div>
         @endif
+        @if ($pinNote)
+          <div style="margin-top:4px;font-size:12px;color:#57606a;">{{ $pinNote }}</div>
+        @endif
       </div>
     @endif
 

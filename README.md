@@ -10,7 +10,8 @@ E-Mail-Versand mit komfortablem Empfänger-Modal (Livewire 3, Bootstrap 5.3).
   (`Müller, Hans <h@x.de>; info@y.de`), Backspace löscht den letzten Chip
 - Chip-Menü: in anderes Feld verschieben; eine Adresse steht nie doppelt
 - **Anhänge** (übergeben oder hochgeladen) oder wahlweise **Download-Links** mit Ablaufdatum und Abrufzähler
-- **Versandprotokoll** in `sent_mails` (Download-Links in `sent_mails_links`)
+- **Versandprotokoll** in `sent_mails` (Download-Links in `sent_mails_links`), verschlüsselt gespeichert
+- **Sicherheit**: TLS-Pflicht, S/MIME-Signatur und -Verschlüsselung, Download-Links mit PIN – siehe [7. Sicherheit](#7-sicherheit)
 
 ---
 
@@ -49,8 +50,8 @@ Bei Einbindung über das CDN-Bundle ist `window.bootstrap` bereits gesetzt.
 ```env
 MAIL_MAILER=smtp
 MAIL_HOST=smtp.gmail.com
-MAIL_PORT=587
-MAIL_ENCRYPTION=tls
+MAIL_PORT=465
+MAIL_SCHEME=smtps
 MAIL_USERNAME=kanzlei@example.de
 MAIL_PASSWORD=<App-Passwort>
 MAIL_FROM_ADDRESS=kanzlei@example.de
@@ -123,6 +124,8 @@ Alle Optionen:
 | `body`        | string                                    | Text (wird als Klartext mit Zeilenumbrüchen versendet) |
 | `attachments` | Liste aus `['disk','path','name']`        | Nur Disks/Pfade aus `config('nfmailer.attachments')` |
 | `links`       | bool                                      | Schalter „Download-Link statt Anhang“ vorbelegen |
+| `pin`         | bool                                      | „Download mit PIN schützen“ vorbelegen (Standard: `links.pin_default`) |
+| `encrypt`     | bool                                      | S/MIME-Verschlüsselung, falls möglich (Standard: `true`) |
 
 Nach erfolgreichem Versand feuert die Komponente `nfmailer-sent` mit der Protokoll-ID:
 
@@ -170,9 +173,15 @@ use Nfgarching\Mailer\Models\SentMail;
 
 SentMail::forContext(['akte' => $akte->id])->latest()->get();
 $mail->links;   // Download-Links mit download_count / last_downloaded_at
+$mail->pin;     // PIN der Download-Links (falls vergeben)
+$mail->signed;  $mail->encrypted;
 ```
 
 `status`: `sent`, `queued`, `failed` (mit `error`).
+
+Betreff, Text, Empfänger, Anhangsliste und PIN liegen **verschlüsselt** in der
+Datenbank (Laravel-Cast `encrypted`, Schlüssel = `APP_KEY`). Deshalb ist keine
+SQL-Suche über diese Felder möglich – gefiltert wird über `context_key`.
 
 ## 6. Hinweise
 
@@ -180,8 +189,110 @@ $mail->links;   // Download-Links mit download_count / last_downloaded_at
   (`php artisan queue:work`, im Docker-Setup als eigener Container).
   Der Status bleibt dann `queued`.
 - **Download-Route** `/nfmailer/d/{token}` ist öffentlich (Empfänger haben kein
-  Login), geschützt durch 48-stelliges Zufallstoken, Ablaufdatum und Rate-Limit.
-  Die App muss dafür von außen erreichbar sein (`APP_URL` korrekt setzen).
-- **Hochgeladene Dateien** landen in `storage/app/nfmailer/uploads` und werden nicht
-  automatisch gelöscht.
+  Login). Die App muss dafür von außen per HTTPS erreichbar sein (`APP_URL`).
+- **Hochgeladene Dateien** landen in `storage/app/nfmailer/uploads`; löschen
+  nur über `nfmailer:prune` mit gesetztem `prune.uploads_after_days`.
 - Views anpassen: `php artisan vendor:publish --tag=nfmailer-views`.
+
+## 7. Sicherheit
+
+Nach dem Update einmal migrieren – die Migration verschlüsselt vorhandene
+Protokolleinträge und stellt bestehende Links auf gehashte Tokens um (bereits
+versandte Links bleiben gültig):
+
+```bash
+php artisan migrate
+php artisan nfmailer:check
+```
+
+`nfmailer:check` prüft TLS, S/MIME-Zertifikat und Schlüssel (inkl.
+Probe-Signatur), `APP_URL`, Link-Einstellungen sowie SPF, DKIM und DMARC der
+Absenderdomain (`--dkim-selector=google` für Google Workspace).
+
+### Mailer „nfmailer“
+
+Das Package versendet immer über den Mailer `nfmailer`, den es selbst
+registriert. Er umhüllt den eigentlichen Versandweg (`NFMAILER_MAILER`, sonst
+`MAIL_MAILER`) und
+
+- **erzwingt TLS**: Bietet der Server kein STARTTLS an, wird nicht versendet
+  (`NFMAILER_REQUIRE_TLS=true`, Standard). Mit Port 465/`smtps` ist die
+  Verbindung von Anfang an verschlüsselt. Für lokale Test-Postfächer wie
+  Mailpit: `NFMAILER_REQUIRE_TLS=false`.
+- **signiert** jede Mail per S/MIME, sobald Zertifikat und Schlüssel gesetzt sind,
+- **verschlüsselt** per S/MIME, wenn im Modal gewählt.
+
+Der Mailer kann auch für eigene Mails der App verwendet werden:
+`Mail::mailer('nfmailer')->send(...)`.
+
+### S/MIME-Signatur
+
+Benötigt ein S/MIME-Zertifikat für die Absenderadresse (z. B. D-Trust, Sectigo,
+Certum). Meist kommt es als `.p12`/`.pfx`; daraus PEM-Dateien erzeugen:
+
+```bash
+mkdir -p /var/secure/smime && cd /var/secure/smime
+openssl pkcs12 -in kanzlei.p12 -clcerts -nokeys -out kanzlei.crt
+openssl pkcs12 -in kanzlei.p12 -nocerts -out kanzlei.key        # mit Passphrase
+openssl pkcs12 -in kanzlei.p12 -cacerts -nokeys -out chain.crt
+chmod 600 kanzlei.key
+```
+
+```env
+NFMAILER_SMIME_CERT=/var/secure/smime/kanzlei.crt
+NFMAILER_SMIME_KEY=/var/secure/smime/kanzlei.key
+NFMAILER_SMIME_PASSPHRASE=…
+NFMAILER_SMIME_CHAIN=/var/secure/smime/chain.crt
+```
+
+Den Schlüssel **nicht** im Projektverzeichnis oder im Git ablegen. Im
+Docker-Setup als Volume bzw. Secret einbinden.
+
+### S/MIME-Verschlüsselung
+
+Funktioniert nur, wenn für **alle** Empfänger (An, CC, BCC) ein Zertifikat
+hinterlegt ist. Das Zertifikat erhält man z. B. aus einer signierten Mail des
+Empfängers (in Outlook/Thunderbird als `.cer` speichern):
+
+```bash
+php artisan nfmailer:cert import mandant.cer
+php artisan nfmailer:cert list
+php artisan nfmailer:cert remove mandant@example.de
+```
+
+Im Modal zeigt ein Schloss an jedem Empfänger, ob ein Zertifikat vorliegt; der
+Schalter „Verschlüsseln“ ist nur aktiv, wenn alle eins haben. Fehlt beim
+Versand doch ein Zertifikat, wird **nicht** unverschlüsselt gesendet, sondern
+abgebrochen. Die Mail wird zusätzlich für das eigene Zertifikat verschlüsselt,
+damit die Kopie unter „Gesendet“ lesbar bleibt.
+
+**Grenze:** Der **Betreff** wird bei S/MIME nicht verschlüsselt – keine
+vertraulichen Angaben (Namen, Diagnosen, Aktenthemen) in den Betreff.
+
+### Download-Links
+
+- Token nur als SHA-256-Hash gespeichert
+- Aufruf zeigt erst eine Seite mit „Herunterladen“-Knopf: Virenscanner und
+  Link-Vorschauen (z. B. Outlook Safe Links) verbrauchen keine Abrufe
+- **PIN** (6 Ziffern, im Modal vorbelegt): wird nach dem Versand angezeigt und
+  ist im Protokoll abrufbar; optional per separater E-Mail. Nach
+  `links.pin_attempts` Fehlversuchen wird der Link gesperrt
+- optional `links.max_downloads`; Sperren per `$link->revoke()`
+- Benachrichtigung an den Absender beim ersten Abruf (`links.notify_on_download`)
+
+### Aufräumen
+
+```php
+// routes/console.php
+Schedule::command('nfmailer:prune')->daily();
+```
+
+Entfernt Links `prune.links_after_days` Tage nach Ablauf; hochgeladene Dateien
+nur, wenn `prune.uploads_after_days` gesetzt ist (Standard: behalten, als
+Nachweis des Versands).
+
+### Wichtig: APP_KEY
+
+Ohne `APP_KEY` ist das Protokoll nicht mehr lesbar. Den Schlüssel getrennt von
+den Datenbank-Backups sichern. Beim Schlüsselwechsel den alten Schlüssel in
+`APP_PREVIOUS_KEYS` eintragen.

@@ -251,14 +251,26 @@ Docker-Setup als Volume bzw. Secret einbinden.
 ### S/MIME-Verschlüsselung
 
 Funktioniert nur, wenn für **alle** Empfänger (An, CC, BCC) ein Zertifikat
-hinterlegt ist. Das Zertifikat erhält man z. B. aus einer signierten Mail des
-Empfängers (in Outlook/Thunderbird als `.cer` speichern):
+hinterlegt ist. Am einfachsten: den Empfänger um **eine signierte E-Mail**
+bitten, diese als `.eml` speichern (Outlook: Datei → Speichern unter; Gmail:
+„Original anzeigen“ → herunterladen; Thunderbird: Speichern als) und importieren:
 
 ```bash
-php artisan nfmailer:cert import mandant.cer
+php artisan nfmailer:cert import antwort-mandant.eml   # signierte Mail
+php artisan nfmailer:cert import mandant.cer           # oder .crt/.pem/.p7s/.p7b
 php artisan nfmailer:cert list
+php artisan nfmailer:cert show mandant@example.de      # inkl. SHA-256-Fingerabdruck
 php artisan nfmailer:cert remove mandant@example.de
 ```
+
+Beim Import einer Mail wird deren Signatur geprüft: Wurde sie verändert, wird
+nichts übernommen. Enthält die Datei eine ganze Kette, werden nur Zertifikate
+mit E-Mail-Adresse übernommen (keine CA-Zertifikate); abgelaufene werden
+abgelehnt. Mit `--email=…` lässt sich der Import auf eine Adresse beschränken.
+
+Ob die ausstellende CA vertrauenswürdig ist, prüft der Import **nicht**. Bei
+sensiblen Mandaten den angezeigten SHA-256-Fingerabdruck kurz telefonisch mit
+dem Empfänger abgleichen.
 
 Im Modal zeigt ein Schloss an jedem Empfänger, ob ein Zertifikat vorliegt; der
 Schalter „Verschlüsseln“ ist nur aktiv, wenn alle eins haben. Fehlt beim

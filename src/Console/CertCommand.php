@@ -3,6 +3,7 @@
 namespace Nfgarching\Mailer\Console;
 
 use Illuminate\Console\Command;
+use Nfgarching\Mailer\Security\CertificateDirectory;
 use Nfgarching\Mailer\Security\CertificateStore;
 use Throwable;
 
@@ -11,6 +12,7 @@ use Throwable;
  *
  *   php artisan nfmailer:cert import mandant.cer      (.cer/.crt/.pem/.p7s/.p7b)
  *   php artisan nfmailer:cert import signierte-mail.eml
+ *   php artisan nfmailer:cert lookup mandant@example.de   in öffentlichen CA-Verzeichnissen suchen
  *   php artisan nfmailer:cert list
  *   php artisan nfmailer:cert show mandant@example.de
  *   php artisan nfmailer:cert verify [mandant@example.de]   Kette + Sperrstatus neu prüfen
@@ -20,8 +22,8 @@ use Throwable;
 class CertCommand extends Command
 {
     protected $signature = 'nfmailer:cert
-        {action : import | list | show | verify | trust | remove}
-        {value? : Datei (import, trust) oder E-Mail-Adresse (show, verify, remove)}
+        {action : import | lookup | list | show | verify | trust | remove}
+        {value? : Datei (import, trust) oder E-Mail-Adresse (lookup, show, verify, remove)}
         {--email= : Beim Import nur diese Adresse übernehmen}';
 
     protected $description = 'S/MIME-Zertifikate der Empfänger verwalten';
@@ -30,13 +32,55 @@ class CertCommand extends Command
     {
         return match ($this->argument('action')) {
             'import' => $this->import($store),
+            'lookup' => $this->lookup($store),
             'list'   => $this->list($store),
             'show'   => $this->show($store),
             'verify' => $this->verify($store),
             'trust'  => $this->trust($store),
             'remove' => $this->remove($store),
-            default  => $this->fail('Unbekannte Aktion. Erlaubt: import, list, show, verify, trust, remove'),
+            default  => $this->fail('Unbekannte Aktion. Erlaubt: import, lookup, list, show, verify, trust, remove'),
         };
+    }
+
+    protected function lookup(CertificateStore $store): int
+    {
+        $email = (string) $this->argument('value');
+        $directory = app(CertificateDirectory::class);
+
+        if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->error('Bitte eine E-Mail-Adresse angeben.');
+
+            return self::FAILURE;
+        }
+        if (! $directory->enabled()) {
+            $this->error('Verzeichnissuche ist abgeschaltet (smime.directory) oder die PHP-Erweiterung ldap fehlt.');
+
+            return self::FAILURE;
+        }
+
+        try {
+            ['imported' => $info, 'log' => $log] = $store->importFromDirectory($email, $directory);
+        } catch (Throwable $e) {
+            $this->error('Gefunden, aber nicht übernommen: ' . $e->getMessage());
+
+            return self::FAILURE;
+        }
+
+        foreach ($log as $line) {
+            $this->line('  ' . $line);
+        }
+
+        if (! $info) {
+            $this->warn("Kein gültiges Zertifikat für {$email} gefunden.");
+
+            return self::FAILURE;
+        }
+
+        $this->info('Importiert für: ' . implode(', ', $info['emails']));
+        $this->details($info);
+        $this->statusLines($info['status'] ?? []);
+
+        return self::SUCCESS;
     }
 
     protected function import(CertificateStore $store): int

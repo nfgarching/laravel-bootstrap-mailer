@@ -235,6 +235,110 @@ class CertificateStore
         return $result;
     }
 
+    /**
+     * Übernimmt das Zertifikat des Absenders aus einer eingegangenen, S/MIME-signierten
+     * Mail (automatischer Import beim Mailabruf, smime.auto_import).
+     *
+     * Nur das Zertifikat für $sender wird übernommen – eine weitergeleitete oder im
+     * Auftrag signierte Mail hinterlegt also nichts für fremde Adressen. Übersprungen
+     * (null) wird, wenn die Mail nicht signiert ist, kein Zertifikat für den Absender
+     * enthält oder bereits dasselbe bzw. ein verwendbares, länger gültiges Zertifikat
+     * hinterlegt ist – so wird der Aussteller nicht bei jeder Mail erneut abgefragt.
+     *
+     * @return array{emails: list<string>, subject: string, issuer: string, valid_to: string, fingerprint: string, status: ?array}|null
+     *
+     * @throws RuntimeException ungültige Signatur, gesperrtes oder nicht vertrauenswürdiges Zertifikat
+     */
+    public function importFromMail(string $raw, string $sender): ?array
+    {
+        $sender = mb_strtolower(trim($sender));
+
+        if ($sender === '' || ! self::isSignedMail($raw)) {
+            return null;
+        }
+
+        foreach (self::extract($raw) as $pem) {
+            $info = $this->inspect($pem);
+
+            if (! $info || ! in_array($sender, $info['emails'], true) || $info['expired']) {
+                continue;
+            }
+
+            $current = $this->show($sender);
+
+            if ($current && (
+                $current['fingerprint'] === $info['fingerprint']
+                || ($this->unusableReason($sender) === null && $current['valid_to_ts'] >= $info['valid_to_ts'])
+            )) {
+                return null;
+            }
+
+            return $this->import($raw, $sender)[0] ?? null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Sucht das Zertifikat für $email in den öffentlichen Verzeichnissen der CAs und
+     * übernimmt das am längsten gültige verwendbare (Verzeichnisse liefern oft auch
+     * alte, abgelaufene Zertifikate derselben Person).
+     *
+     * @return array{imported: ?array, log: list<string>}
+     *         imported: wie import()[0], null wenn nichts Verwendbares gefunden wurde
+     *
+     * @throws RuntimeException gefundene Zertifikate wurden alle abgelehnt (gesperrt, Kette …)
+     */
+    public function importFromDirectory(string $email, CertificateDirectory $directory): array
+    {
+        $email = mb_strtolower(trim($email));
+        ['certificates' => $found, 'log' => $log] = $directory->lookup($email);
+
+        $candidates = [];
+        foreach ($found as $pem) {
+            $info = $this->inspect($pem);
+            if ($info && ! $info['expired'] && in_array($email, $info['emails'], true)) {
+                $candidates[$info['fingerprint']] = ['pem' => $pem, 'valid_to_ts' => $info['valid_to_ts']];
+            }
+        }
+
+        if (! $candidates) {
+            return ['imported' => null, 'log' => $log];
+        }
+
+        usort($candidates, fn ($a, $b) => $b['valid_to_ts'] <=> $a['valid_to_ts']);
+
+        $errors = [];
+        foreach ($candidates as $c) {
+            try {
+                return ['imported' => $this->import($c['pem'], $email)[0] ?? null, 'log' => $log];
+            } catch (RuntimeException $e) {
+                $errors[] = $e->getMessage();
+            }
+        }
+
+        throw new RuntimeException(implode('; ', array_unique($errors)));
+    }
+
+    /**
+     * Ist die Mail selbst S/MIME-signiert? Geprüft wird nur der Kopf der Mail, nicht
+     * eingebettete (weitergeleitete) Nachrichten. Verschlüsselte Mails zählen nicht.
+     */
+    public static function isSignedMail(string $raw): bool
+    {
+        $header = preg_split("/\r?\n\r?\n/", $raw, 2)[0];
+        $header = preg_replace("/\r?\n[ \t]+/", ' ', $header);   // gefaltete Kopfzeilen
+
+        if (! preg_match('/^content-type:\s*([^\r\n]+)/im', $header, $m)) {
+            return false;
+        }
+
+        $type = strtolower($m[1]);
+
+        return (str_starts_with($type, 'multipart/signed') && str_contains($type, 'pkcs7-signature'))
+            || (preg_match('#^application/(x-)?pkcs7-mime#', $type) && str_contains($type, 'signed-data'));
+    }
+
     /** Details zum hinterlegten Zertifikat einer Adresse (auch abgelaufen) oder null */
     public function show(string $email): ?array
     {

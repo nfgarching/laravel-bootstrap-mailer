@@ -166,6 +166,21 @@ akten­bezogene Quelle so eine Prüfung haben.
 Treffer mehrerer Quellen werden nach E-Mail zusammengeführt; die zuerst
 eingetragene Quelle gewinnt (Name/Hinweis).
 
+### Anhang-Quellen
+
+Unter `attachment_sources` eingetragene Klassen bieten im Modal Dateien zur Auswahl an
+(Button „Aus der Akte“, nur wenn beim Öffnen ein `context` übergeben wurde). Jede Quelle
+implementiert `Nfgarching\Mailer\Contracts\AttachmentSource`:
+
+- `label()` – Gruppenüberschrift
+- `items($context)` – Einträge `['id', 'name', 'group', 'size', 'disk', 'path']`;
+  `group` fasst Dateien zusammen (z. B. ein Dokument)
+- `resolve($id, $context)` – `['disk', 'path', 'name']` zu einer ID oder `null`
+
+Der Browser schickt nur `"{Quelle}|{ID}"`; den Pfad ermittelt `resolve()` auf dem Server,
+anschließend prüft `AttachmentGuard` ihn wie einen beim Öffnen übergebenen Anhang. Auch hier
+gilt: Der Kontext kommt vom Browser, die Quelle muss die Berechtigung selbst prüfen.
+
 ## 5. Protokoll
 
 ```php
@@ -270,6 +285,20 @@ abgelehnt. Mit `--email=…` lässt sich der Import auf eine Adresse beschränke
 
 Bei sensiblen Mandaten zusätzlich den angezeigten SHA-256-Fingerabdruck kurz
 telefonisch mit dem Empfänger abgleichen.
+
+**Automatischer Import:** `CertificateStore::importFromMail($raw, $absender)` übernimmt
+das Zertifikat des Absenders aus einer eingegangenen signierten Mail (nur für dessen
+Adresse; übersprungen, wenn dasselbe oder ein länger gültiges schon vorliegt). Die
+Anwendung ruft es beim Mailabruf auf; abschaltbar mit `NFMAILER_SMIME_AUTO_IMPORT=false`
+(`smime.auto_import`).
+
+**Öffentliche Verzeichnisse:** `php artisan nfmailer:cert lookup mandant@example.de` bzw.
+der Knopf „Zertifikate in öffentlichen Verzeichnissen suchen“ im Modal fragt die
+LDAP-Verzeichnisse der CAs ab (`smime.directory.servers`: D-Trust, DFN-PKI, TeleSec,
+SwissSign) und übernimmt das am längsten gültige Zertifikat der Adresse. Viele CAs
+(Sectigo, Certum, Actalis …) veröffentlichen nicht. Jede Suche übermittelt die Adresse
+an alle Verzeichnisse – deshalb nur auf Wunsch; abschaltbar mit
+`NFMAILER_SMIME_LOOKUP=false`. Benötigt die PHP-Erweiterung `ldap`.
 
 ### Prüfung bei der Zertifizierungsstelle
 

@@ -12,6 +12,7 @@ use Nfgarching\Mailer\Console\CertCommand;
 use Nfgarching\Mailer\Console\CheckCommand;
 use Nfgarching\Mailer\Console\PruneCommand;
 use Nfgarching\Mailer\Livewire\MailComposer;
+use Nfgarching\Mailer\Security\CertificateDirectory;
 use Nfgarching\Mailer\Security\CertificateStore;
 use Nfgarching\Mailer\Security\SecureTransport;
 use Nfgarching\Mailer\Sources\RecipientResolver;
@@ -24,6 +25,7 @@ class MailerServiceProvider extends ServiceProvider
 
         $this->app->scoped(RecipientResolver::class);
         $this->app->singleton(CertificateStore::class, fn () => CertificateStore::fromConfig());
+        $this->app->singleton(CertificateDirectory::class, fn () => CertificateDirectory::fromConfig());
 
         // Mailer „nfmailer“: umhüllt den eigentlichen Versandweg (TLS-Pflicht, S/MIME)
         if (! $this->app['config']->has('mail.mailers.nfmailer')) {

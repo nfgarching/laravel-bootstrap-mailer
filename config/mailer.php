@@ -72,6 +72,24 @@ return [
         'encrypt'     => (bool) env('NFMAILER_SMIME_ENCRYPT', true),  // Option im Modal anbieten
         'certificates' => storage_path('app/private/nfmailer/certs'), // Zertifikate der Empfänger
 
+        // Zertifikat des Absenders aus eingehenden signierten Mails übernehmen
+        // (die Anwendung ruft dazu CertificateStore::importFromMail() beim Mailabruf auf)
+        'auto_import' => (bool) env('NFMAILER_SMIME_AUTO_IMPORT', true),
+
+        // Suche in öffentlichen LDAP-Verzeichnissen der CAs (nfmailer:cert lookup, Knopf im Modal).
+        // Nur auf Wunsch: jede Suche schickt die Empfängeradresse an alle Verzeichnisse.
+        // Benötigt die PHP-Erweiterung ldap.
+        'directory' => [
+            'enabled' => (bool) env('NFMAILER_SMIME_LOOKUP', true),
+            'timeout' => 5,   // Sekunden je Verzeichnis
+            'servers' => [
+                ['name' => 'D-Trust',   'uri' => 'ldap://directory.d-trust.net',   'base' => 'c=de'],
+                ['name' => 'DFN-PKI',   'uri' => 'ldap://ldap.pca.dfn.de',         'base' => 'o=DFN-Verein,c=DE'],
+                ['name' => 'TeleSec',   'uri' => 'ldap://ldap.telesec.de',         'base' => 'c=de'],
+                ['name' => 'SwissSign', 'uri' => 'ldap://directory.swisssign.net', 'base' => 'o=SwissSign AG,c=CH'],
+            ],
+        ],
+
         // Prüfung der Empfänger-Zertifikate bei der Zertifizierungsstelle
         'trust' => [
             // Vertrauenskette: 'require' = nur Zertifikate einer vertrauenswürdigen CA verwenden,
@@ -106,12 +124,23 @@ return [
     'gate' => null,
 
     // Dateien, die beim Öffnen übergeben werden dürfen (Schutz vor Pfad-Manipulation)
-    // allowed_prefixes: Liste für alle Disks oder [disk => Liste]; Disk ohne Eintrag = ganze Disk
+    // allowed_prefixes: Liste für alle Disks oder [disk => Liste]; Disk ohne Eintrag = ganze Disk.
+    // Einträge mit * sind Muster: Dokumente liegen unter {FILE_DIR_PREFIX}{Jahr}/akv/files|mails/…
     'attachments' => [
         'allowed_disks'    => ['local', 'data'],
         'allowed_prefixes' => [
-            'local' => ['akten/', 'rechnungen/'],
+            'local' => ['akten/', 'rechnungen/', '*akv/files/*', '*akv/mails/*'],
             // 'data': Dokumentablage der Kanzlei (Anhänge der Dokumente, z. B. 2026/akv/files/…)
+        ],
+    ],
+
+    // Anhänge im Modal aus einer Quelle wählen (Button „Aus der Akte“, nur mit 'context').
+    // Jede Quelle implementiert Nfgarching\Mailer\Contracts\AttachmentSource; die Dateien
+    // durchlaufen dieselbe Prüfung wie oben ('attachments').
+    'attachment_sources' => [
+        [
+            'class' => 'App\\Mail\\Attachments\\AkteDokumenteSource',
+            'label' => 'Dokumente der Akte',
         ],
     ],
 

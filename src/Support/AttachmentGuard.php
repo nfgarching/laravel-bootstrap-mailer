@@ -34,7 +34,10 @@ class AttachmentGuard
         if (! array_is_list($prefixes)) {
             $prefixes = (array) ($prefixes[$disk] ?? []);
         }
-        if ($prefixes && ! Str::startsWith($path, $prefixes)) {
+        // Einträge mit * sind Muster (Str::is), z. B. '*akv/files/*' für {Präfix}{Jahr}/akv/files/…
+        if ($prefixes && ! collect($prefixes)->contains(
+            fn ($p) => str_contains($p, '*') ? Str::is($p, $path) : Str::startsWith($path, $p)
+        )) {
             return null;
         }
 

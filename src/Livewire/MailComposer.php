@@ -15,7 +15,9 @@ use Nfgarching\Mailer\Data\Recipient;
 use Nfgarching\Mailer\Mail\ComposedMail;
 use Nfgarching\Mailer\Models\MailLink;
 use Nfgarching\Mailer\Models\SentMail;
+use Nfgarching\Mailer\Security\CertificateDirectory;
 use Nfgarching\Mailer\Security\CertificateStore;
+use Nfgarching\Mailer\Sources\AttachmentResolver;
 use Nfgarching\Mailer\Sources\RecipientResolver;
 use Nfgarching\Mailer\Support\AddressParser;
 use Nfgarching\Mailer\Support\AttachmentGuard;
@@ -39,29 +41,50 @@ class MailComposer extends Component
 
     /** @var list<array{email: string, name: ?string, hint: ?string, source: ?string}> */
     public array $to = [];
+
     public array $cc = [];
+
     public array $bcc = [];
 
     public string $activeField = 'to';
+
     public string $search = '';
+
     public string $freeInput = '';
 
     /** Markierte E-Mails in der Auswahlliste */
     public array $picked = [];
 
     public string $subject = '';
+
     public string $body = '';
 
     #[Locked]
     public array $context = [];
 
-    /** Übergebene (geprüfte) Anhänge */
+    /**
+     * Geprüfte Anhänge; 'active' = wird mitgesendet. Übergebene Anhänge (origin 'preset')
+     * bleiben beim Abwählen in der Liste, damit sie wieder aktiviert werden können.
+     */
     #[Locked]
     public array $attachments = [];
 
+    /** Überschrift der übergebenen Anhänge in der rechten Spalte (Option attachments_label) */
+    #[Locked]
+    public string $attachmentsLabel = '';
+
     /** @var list<TemporaryUploadedFile> */
     public array $uploads = [];
+
     public array $newUploads = [];
+
+    /** Auswahl „Aus der Akte“ (Anhang-Quellen) geöffnet */
+    public bool $showSources = false;
+
+    public string $sourceSearch = '';
+
+    /** Markierte Dateien der Anhang-Quellen (Schlüssel aus AttachmentResolver) */
+    public array $pickedFiles = [];
 
     public bool $asLinks = false;
 
@@ -73,6 +96,9 @@ class MailComposer extends Component
 
     /** S/MIME-Verschlüsselung (nur wirksam, wenn alle Empfänger ein Zertifikat haben) */
     public bool $encrypt = true;
+
+    /** Ergebnis der letzten Zertifikatssuche in den CA-Verzeichnissen, je Adresse eine Zeile */
+    public array $lookupResults = [];
 
     /** Ergebnis nach Versand mit PIN (Modal bleibt offen, damit die PIN sichtbar ist) */
     public ?array $result = null;
@@ -95,7 +121,7 @@ class MailComposer extends Component
             return;
         }
 
-        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'attachments']))
+        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'attachments', 'attachments_label']))
             ->map(fn ($v) => is_string($v) && json_validate($v) && is_array($decoded = json_decode($v, true)) ? $decoded : $v)
             ->all();
 
@@ -115,9 +141,9 @@ class MailComposer extends Component
 
         $this->context = (array) ($options['context'] ?? []);
         $this->subject = (string) ($options['subject'] ?? '');
-        $this->body    = (string) ($options['body'] ?? '');
+        $this->body = (string) ($options['body'] ?? '');
         $this->asLinks = (bool) ($options['links'] ?? config('nfmailer.links.default', false));
-        $this->usePin  = (bool) ($options['pin'] ?? config('nfmailer.links.pin_default', true));
+        $this->usePin = (bool) ($options['pin'] ?? config('nfmailer.links.pin_default', true));
         $this->encrypt = (bool) ($options['encrypt'] ?? true);
 
         foreach (array_keys(self::FIELDS) as $field) {
@@ -128,11 +154,13 @@ class MailComposer extends Component
             }
         }
 
+        // Übergebene Anhänge stehen rechts zur Auswahl, zunächst alle aktiv
         foreach ((array) ($options['attachments'] ?? []) as $a) {
             if (is_array($a) && $checked = AttachmentGuard::check($a)) {
-                $this->attachments[] = $checked;
+                $this->attachments[] = [...$checked, 'active' => true];
             }
         }
+        $this->attachmentsLabel = (string) ($options['attachments_label'] ?? '');
 
         $this->dispatch('nfmailer-show');
     }
@@ -192,8 +220,24 @@ class MailComposer extends Component
         $this->resetErrorBag('freeInput');
 
         if ($invalid) {
-            $this->addError('freeInput', 'Keine gültige E-Mail-Adresse: ' . implode(', ', $invalid));
+            $this->addError('freeInput', 'Keine gültige E-Mail-Adresse: '.implode(', ', $invalid));
         }
+    }
+
+    /** Auswahl aus dem Dropdown unter dem Eingabefeld */
+    public function addInline(string $email): void
+    {
+        $hit = collect($this->inlineResults)
+            ->first(fn ($r) => mb_strtolower($r['email']) === mb_strtolower($email));
+
+        if ($r = AddressParser::one($hit ?? $email)) {
+            $this->put($this->activeField, $r);
+        }
+
+        // Treffer neu berechnen (sonst rendert der gemerkte Computed-Wert das Dropdown erneut)
+        $this->freeInput = '';
+        unset($this->inlineResults);
+        $this->resetErrorBag('freeInput');
     }
 
     public function remove(string $field, string $email): void
@@ -281,6 +325,25 @@ class MailComposer extends Component
         return app(RecipientResolver::class)->search($term, $this->context);
     }
 
+    /** Treffer für das Dropdown unter dem Eingabefeld (ohne bereits gewählte Adressen) */
+    #[Computed]
+    public function inlineResults(): array
+    {
+        $term = trim($this->freeInput);
+
+        // Mehrere Adressen (Einfügen) oder zu kurzer Begriff: kein Dropdown
+        if (mb_strlen($term) < (int) config('nfmailer.search.min_chars', 2) || preg_match('/[,;]/', $term)) {
+            return [];
+        }
+
+        $assigned = $this->assigned;
+
+        return array_values(array_filter(
+            app(RecipientResolver::class)->search($term, $this->context),
+            fn ($r) => ! isset($assigned[mb_strtolower($r['email'])]),
+        ));
+    }
+
     /** [email => Feld] aller bereits gewählten Adressen */
     #[Computed]
     public function assigned(): array
@@ -306,7 +369,7 @@ class MailComposer extends Component
     /**
      * Stand von Signatur und Verschlüsselung für die aktuelle Empfängerliste.
      *
-     * @return array{signs: bool, canEncrypt: bool, encryptPossible: bool, missing: list<string>, certs: array<string, bool>}
+     * @return array{signs: bool, canEncrypt: bool, encryptPossible: bool, canLookup: bool, missing: list<string>, certs: array<string, bool>}
      */
     #[Computed]
     public function security(): array
@@ -330,16 +393,45 @@ class MailComposer extends Component
 
         $missing = [];
         foreach (array_keys(array_filter($certs, fn ($ok) => ! $ok)) as $e) {
-            $missing[] = $e . ' (' . app(CertificateStore::class)->unusableReason($e) . ')';
+            $missing[] = $e.' ('.app(CertificateStore::class)->unusableReason($e).')';
         }
 
         return [
-            'signs'           => $signs,
-            'canEncrypt'      => $canEncrypt,
+            'signs' => $signs,
+            'canEncrypt' => $canEncrypt,
             'encryptPossible' => $canEncrypt && $emails && ! $missing,
-            'missing'         => $missing,
-            'certs'           => $certs,
+            'canLookup' => $canEncrypt && app(CertificateDirectory::class)->enabled(),
+            'missing' => $missing,
+            'certs' => $certs,
         ];
+    }
+
+    /**
+     * Fehlende Empfänger-Zertifikate in den öffentlichen CA-Verzeichnissen suchen.
+     * Nur auf Knopfdruck: die Adressen gehen dabei an alle eingetragenen Verzeichnisse.
+     */
+    public function lookupCertificates(): void
+    {
+        $directory = app(CertificateDirectory::class);
+        if (! $directory->enabled()) {
+            return;
+        }
+
+        $store = app(CertificateStore::class);
+        $this->lookupResults = [];
+
+        foreach (array_keys(array_filter($this->security['certs'], fn ($ok) => ! $ok)) as $email) {
+            try {
+                $info = $store->importFromDirectory($email, $directory)['imported'];
+                $this->lookupResults[] = $info
+                    ? "{$email}: Zertifikat übernommen ({$info['issuer']}, gültig bis {$info['valid_to']})"
+                    : "{$email}: in keinem Verzeichnis gefunden";
+            } catch (Throwable $e) {
+                $this->lookupResults[] = "{$email}: gefunden, aber nicht übernommen – {$e->getMessage()}";
+            }
+        }
+
+        unset($this->security);
     }
 
     /** Neue Mail nach Versand mit PIN-Anzeige */
@@ -355,7 +447,7 @@ class MailComposer extends Component
     public function updatedNewUploads(): void
     {
         $this->validate(
-            ['newUploads.*' => 'file|max:' . (int) config('nfmailer.uploads.max_kb', 20480)],
+            ['newUploads.*' => 'file|max:'.(int) config('nfmailer.uploads.max_kb', 20480)],
             ['newUploads.*.max' => 'Die Datei ist zu groß.'],
         );
 
@@ -363,10 +455,100 @@ class MailComposer extends Component
         $this->newUploads = [];
     }
 
+    public function toggleSources(): void
+    {
+        $this->showSources = ! $this->showSources;
+        $this->sourceSearch = '';
+        $this->pickedFiles = [];
+    }
+
+    /** Dateien der Anhang-Quellen, nach Suchbegriff gefiltert (nur bei geöffneter Auswahl) */
+    #[Computed]
+    public function sourceFiles(): array
+    {
+        if (! $this->showSources || ! $this->context) {
+            return [];
+        }
+
+        $groups = app(AttachmentResolver::class)->items($this->context);
+        $term = mb_strtolower(trim($this->sourceSearch));
+
+        if ($term === '') {
+            return $groups;
+        }
+
+        return array_filter(array_map(
+            fn (array $items) => array_values(array_filter(
+                $items,
+                fn (array $f) => str_contains(mb_strtolower($f['name'].' '.$f['group']), $term),
+            )),
+            $groups,
+        ));
+    }
+
+    /** Markierte Dateien anhängen; die Pfade ermittelt die Quelle, nicht der Browser */
+    public function addSourceFiles(): void
+    {
+        $resolver = app(AttachmentResolver::class);
+
+        foreach ($this->pickedFiles as $key) {
+            if (! $file = $resolver->resolve((string) $key, $this->context)) {
+                continue;
+            }
+
+            // Schon vorhanden (z. B. abgewählter übergebener Anhang): wieder aktivieren
+            $i = collect($this->attachments)->search(fn ($a) => $a['disk'] === $file['disk'] && $a['path'] === $file['path']);
+
+            if ($i === false) {
+                $this->attachments[] = [...$file, 'active' => true];
+            } else {
+                $this->attachments[$i]['active'] = true;
+            }
+        }
+
+        $this->pickedFiles = [];
+        $this->showSources = false;
+    }
+
+    /** Checkbox eines übergebenen Anhangs in der rechten Spalte */
+    public function toggleAttachment(int $i): void
+    {
+        if (isset($this->attachments[$i])) {
+            $this->attachments[$i]['active'] = ! ($this->attachments[$i]['active'] ?? true);
+        }
+    }
+
+    /** Alle übergebenen Anhänge aktivieren bzw. abwählen */
+    public function setPresetAttachments(bool $active): void
+    {
+        foreach ($this->attachments as $i => $a) {
+            if ($a['origin'] === 'preset') {
+                $this->attachments[$i]['active'] = $active;
+            }
+        }
+    }
+
+    /** Übergebene Anhänge werden nur abgewählt, andere entfernt */
     public function removeAttachment(int $i): void
     {
+        if (($this->attachments[$i]['origin'] ?? null) === 'preset') {
+            $this->attachments[$i]['active'] = false;
+
+            return;
+        }
+
         unset($this->attachments[$i]);
         $this->attachments = array_values($this->attachments);
+    }
+
+    /** Anhänge, die mitgesendet werden (ohne das Auswahl-Flag) */
+    protected function activeAttachments(): array
+    {
+        return collect($this->attachments)
+            ->filter(fn ($a) => $a['active'] ?? true)
+            ->map(fn ($a) => collect($a)->except('active')->all())
+            ->values()
+            ->all();
     }
 
     public function removeUpload(int $i): void
@@ -391,52 +573,52 @@ class MailComposer extends Component
         }
 
         $this->validate([
-            'to'      => 'required|array|min:1',
+            'to' => 'required|array|min:1',
             'subject' => 'required|string|max:255',
-            'body'    => 'required|string',
+            'body' => 'required|string',
         ], [
-            'to.required'      => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
-            'to.min'           => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
+            'to.required' => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
+            'to.min' => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
             'subject.required' => 'Bitte einen Betreff eingeben.',
-            'body.required'    => 'Bitte einen Text eingeben.',
+            'body.required' => 'Bitte einen Text eingeben.',
         ]);
 
         // Hochgeladene Dateien dauerhaft speichern
-        $files = $this->attachments;
+        $files = $this->activeAttachments();
         $disk = config('nfmailer.uploads.disk', 'local');
 
         foreach ($this->uploads as $upload) {
             $files[] = [
-                'disk'   => $disk,
-                'path'   => $upload->store(config('nfmailer.uploads.directory', 'nfmailer/uploads'), $disk),
-                'name'   => $upload->getClientOriginalName(),
-                'size'   => $upload->getSize(),
+                'disk' => $disk,
+                'path' => $upload->store(config('nfmailer.uploads.directory', 'nfmailer/uploads'), $disk),
+                'name' => $upload->getClientOriginalName(),
+                'size' => $upload->getSize(),
                 'origin' => 'upload',
             ];
         }
 
-        $inner    = config('nfmailer.mailer') ?: config('mail.default');
-        $queue    = (bool) config('nfmailer.queue', false);
+        $inner = config('nfmailer.mailer') ?: config('mail.default');
+        $queue = (bool) config('nfmailer.queue', false);
         unset($this->security);
         $security = $this->security;
-        $encrypt  = $this->encrypt && $security['encryptPossible'];
-        $pin      = ($this->asLinks && $files && $this->usePin) ? MailLink::generatePin() : null;
+        $encrypt = $this->encrypt && $security['encryptPossible'];
+        $pin = ($this->asLinks && $files && $this->usePin) ? MailLink::generatePin() : null;
 
         $log = SentMail::create([
-            'user_id'     => auth()->id(),
-            'status'      => 'pending',
-            'mailer'      => $inner,
-            'subject'     => $this->subject,
-            'body'        => $this->body,
-            'to'          => $this->to,
-            'cc'          => $this->cc,
-            'bcc'         => $this->bcc,
+            'user_id' => auth()->id(),
+            'status' => 'pending',
+            'mailer' => $inner,
+            'subject' => $this->subject,
+            'body' => $this->body,
+            'to' => $this->to,
+            'cc' => $this->cc,
+            'bcc' => $this->bcc,
             'attachments' => $files,
-            'as_links'    => $this->asLinks && $files,
-            'signed'      => $security['signs'],
-            'encrypted'   => $encrypt,
-            'pin'         => $pin,
-            'context'     => $this->context,
+            'as_links' => $this->asLinks && $files,
+            'signed' => $security['signs'],
+            'encrypted' => $encrypt,
+            'pin' => $pin,
+            'context' => $this->context,
             'context_key' => SentMail::contextKey($this->context),
         ]);
 
@@ -445,8 +627,8 @@ class MailComposer extends Component
             foreach ($files as $f) {
                 $link = MailLink::issue($f, $log->id, $pin);
                 $links[] = [
-                    'name'    => $f['name'],
-                    'url'     => $link->url(),
+                    'name' => $f['name'],
+                    'url' => $link->url(),
                     'expires' => $link->expires_at?->format('d.m.Y'),
                 ];
             }
@@ -472,15 +654,15 @@ class MailComposer extends Component
             } else {
                 $sent = Mail::mailer('nfmailer')->send($mail);
                 $log->update([
-                    'status'     => 'sent',
-                    'sent_at'    => now(),
+                    'status' => 'sent',
+                    'sent_at' => now(),
                     'message_id' => $sent?->getMessageId(),
                 ]);
             }
         } catch (Throwable $e) {
             report($e);
             $log->update(['status' => 'failed', 'error' => $e->getMessage()]);
-            $this->notice = 'Versand fehlgeschlagen: ' . $e->getMessage();
+            $this->notice = 'Versand fehlgeschlagen: '.$e->getMessage();
 
             return;
         }
@@ -495,10 +677,10 @@ class MailComposer extends Component
         if ($pin) {
             // Modal offen lassen: Die PIN muss dem Empfänger mitgeteilt werden
             $this->result = [
-                'id'        => $log->id,
-                'pin'       => $pin,
+                'id' => $log->id,
+                'pin' => $pin,
                 'pinMailed' => $pinMailed,
-                'signed'    => $security['signs'],
+                'signed' => $security['signs'],
                 'encrypted' => $encrypt,
             ];
 
@@ -513,9 +695,9 @@ class MailComposer extends Component
     protected function sendPinMail(string $pin): bool
     {
         $text = "Guten Tag,\n\nfür die Dokumente, die ich Ihnen soeben in einer separaten E-Mail zum Download "
-            . "bereitgestellt habe, lautet die PIN:\n\n    {$pin}\n\n"
-            . 'Die PIN ist für alle Dokumente dieser E-Mail gültig.'
-            . (($sig = config('nfmailer.signature')) ? "\n\n--\n{$sig}" : '');
+            ."bereitgestellt habe, lautet die PIN:\n\n    {$pin}\n\n"
+            .'Die PIN ist für alle Dokumente dieser E-Mail gültig.'
+            .(($sig = config('nfmailer.signature')) ? "\n\n--\n{$sig}" : '');
 
         try {
             // Symfony\Address verlangt einen String als Namen (null führt zu TypeError)
@@ -555,13 +737,13 @@ class MailComposer extends Component
             ['to' => 'required|array|min:1'],
             [
                 'to.required' => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
-                'to.min'      => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
+                'to.min' => 'Bitte mindestens einen Empfänger unter „An“ angeben.',
             ],
         );
 
         $this->dispatch('nfmailer-mailto', url: $this->mailtoUrl());
 
-        if ($this->attachments || $this->uploads) {
+        if ($this->activeAttachments() || $this->uploads) {
             // Modal offen lassen, damit die Anhänge nicht verloren gehen
             $this->notice = 'Anhänge werden an das Mailprogramm nicht übergeben – bitte dort von Hand anfügen.';
 
@@ -582,19 +764,19 @@ class MailComposer extends Component
 
         $body = $this->body;
         if ($signature = config('nfmailer.signature')) {
-            $body .= "\n\n--\n" . $signature;
+            $body .= "\n\n--\n".$signature;
         }
 
         $params = array_filter([
-            'cc'      => $list($this->cc),
-            'bcc'     => $list($this->bcc),
+            'cc' => $list($this->cc),
+            'bcc' => $list($this->bcc),
             'subject' => rawurlencode($this->subject),
-            'body'    => rawurlencode(preg_replace('/\r\n|\r|\n/', "\r\n", $body)),
+            'body' => rawurlencode(preg_replace('/\r\n|\r|\n/', "\r\n", $body)),
         ]);
 
-        $query = implode('&', array_map(fn ($k, $v) => $k . '=' . $v, array_keys($params), $params));
+        $query = implode('&', array_map(fn ($k, $v) => $k.'='.$v, array_keys($params), $params));
 
-        return 'mailto:' . $list($this->to) . ($query ? '?' . $query : '');
+        return 'mailto:'.$list($this->to).($query ? '?'.$query : '');
     }
 
     protected function addressList(array $recipients): array

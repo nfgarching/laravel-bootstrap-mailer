@@ -13,6 +13,7 @@ use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 use Nfgarching\Mailer\Data\Recipient;
 use Nfgarching\Mailer\Mail\ComposedMail;
+use Nfgarching\Mailer\Models\MailFavorite;
 use Nfgarching\Mailer\Models\MailLink;
 use Nfgarching\Mailer\Models\SentMail;
 use Nfgarching\Mailer\Security\CertificateDirectory;
@@ -21,6 +22,9 @@ use Nfgarching\Mailer\Sources\AttachmentResolver;
 use Nfgarching\Mailer\Sources\RecipientResolver;
 use Nfgarching\Mailer\Support\AddressParser;
 use Nfgarching\Mailer\Support\AttachmentGuard;
+use Nfgarching\Textbot\Enhancers\EnhancerFactory;
+use Nfgarching\Textbot\Exceptions\TextEnhancementException;
+use Nfgarching\Textbot\Services\AudioTranscriptionService;
 use Throwable;
 
 /**
@@ -47,6 +51,9 @@ class MailComposer extends Component
     public array $bcc = [];
 
     public string $activeField = 'to';
+
+    /** CC/BCC-Zeilen eingeblendet (belegte Felder werden immer gezeigt) */
+    public bool $showCopies = false;
 
     public string $search = '';
 
@@ -78,7 +85,10 @@ class MailComposer extends Component
 
     public array $newUploads = [];
 
-    /** Auswahl „Aus der Akte“ (Anhang-Quellen) geöffnet */
+    /** Diktat-Aufnahme (temporär, wird nach der Transkription verworfen) */
+    public ?TemporaryUploadedFile $audioUpload = null;
+
+    /** Offcanvas „Anhänge“ geöffnet – nur dann werden die Anhang-Quellen abgefragt */
     public bool $showSources = false;
 
     public string $sourceSearch = '';
@@ -166,6 +176,13 @@ class MailComposer extends Component
     }
 
     // ---------------------------------------------------------------- Empfänger
+
+    /** CC/BCC einblenden (sonst nur sichtbar, wenn belegt) und CC aktivieren */
+    public function showCopyFields(): void
+    {
+        $this->showCopies = true;
+        $this->setActive('cc');
+    }
 
     public function setActive(string $field): void
     {
@@ -303,6 +320,49 @@ class MailComposer extends Component
         $hit = $pool->first(fn ($r) => mb_strtolower($r['email']) === $key);
 
         return $hit ? AddressParser::one($hit) : null;
+    }
+
+    // ---------------------------------------------------------------- Favoriten
+
+    /** Persönliche Favoriten des Users: [email => true] (für den Stern in der Liste) */
+    #[Computed]
+    public function favoriteKeys(): array
+    {
+        if (! auth()->id()) {
+            return [];
+        }
+
+        return MailFavorite::query()
+            ->where('user_id', auth()->id())
+            ->pluck('email')
+            ->mapWithKeys(fn ($e) => [mb_strtolower($e) => true])
+            ->all();
+    }
+
+    /** Stern: Adresse zu den persönlichen Favoriten hinzufügen bzw. daraus entfernen. */
+    public function toggleFavorite(string $email): void
+    {
+        $key = mb_strtolower(trim($email));
+
+        if (! auth()->id() || ! filter_var($key, FILTER_VALIDATE_EMAIL, FILTER_FLAG_EMAIL_UNICODE)) {
+            return;
+        }
+
+        $existing = MailFavorite::query()->where('user_id', auth()->id())->where('email', $key)->first();
+
+        if ($existing) {
+            $existing->delete();
+        } else {
+            $r = $this->lookup($key);
+            MailFavorite::create([
+                'user_id' => auth()->id(),
+                'email' => $key,
+                'name' => $r?->name,
+                'hint' => $r?->hint,
+            ]);
+        }
+
+        unset($this->favoriteKeys, $this->suggestions, $this->results);
     }
 
     // ---------------------------------------------------------------- Listen
@@ -455,9 +515,100 @@ class MailComposer extends Component
         $this->newUploads = [];
     }
 
-    public function toggleSources(): void
+    // ---------------------------------------------------------------- KI & Diktat (textbot)
+
+    /** KI-Bearbeitung und Diktat nur, wenn das textbot-Package installiert ist */
+    #[Computed]
+    public function textbotAvailable(): bool
     {
-        $this->showSources = ! $this->showSources;
+        return class_exists(EnhancerFactory::class);
+    }
+
+    /**
+     * Nachrichtentext per KI bearbeiten – im Standardmodus des Textbots
+     * (config('textbot.defaults.mode')) mit dessen Provider/Modell.
+     */
+    public function enhance(): void
+    {
+        $this->notice = null;
+
+        if (! $this->textbotAvailable) {
+            return;
+        }
+
+        if (trim($this->body) === '') {
+            $this->notice = 'Bitte zuerst einen Text eingeben.';
+
+            return;
+        }
+
+        $modes = config('textbot.modes', []);
+        $mode = config('textbot.defaults.mode');
+        if (! isset($modes[$mode])) {
+            $mode = array_key_first($modes);
+        }
+
+        try {
+            $this->body = app(EnhancerFactory::class)
+                ->make($modes[$mode]['provider'] ?? null)
+                ->enhance($this->body, [
+                    'model' => $modes[$mode]['aimodel'] ?? null,
+                    'system_prompt' => $modes[$mode]['prompt'] ?? null,
+                ]);
+        } catch (TextEnhancementException $e) {
+            $this->notice = $e->getMessage();
+        }
+    }
+
+    /** Diktat-Aufnahme (Upload aus dem textbot-Partial) transkribieren und am Cursor einfügen */
+    public function updatedAudioUpload(): void
+    {
+        $this->notice = null;
+
+        $upload = $this->audioUpload;
+        $this->audioUpload = null;
+
+        if (! $upload || ! $this->textbotAvailable) {
+            return;
+        }
+
+        $mime = (string) $upload->getMimeType();
+
+        if (! str_starts_with($mime, 'audio/')) {
+            $this->notice = 'Nur Audio-Aufnahmen können transkribiert werden.';
+
+            return;
+        }
+
+        if ($upload->getSize() > 12 * 1024 * 1024) {
+            $this->notice = 'Aufnahme zu groß (max. 12 MB).';
+
+            return;
+        }
+
+        try {
+            $transcript = app(AudioTranscriptionService::class)->transcribe($upload->get(), $mime);
+        } catch (TextEnhancementException $e) {
+            $this->notice = $e->getMessage();
+
+            return;
+        }
+
+        $this->dispatch('nfmailer-insert-transcript', text: $transcript);
+    }
+
+    /** Offcanvas „Anhänge“ geöffnet: Dateien der Anhang-Quellen laden */
+    public function openSources(): void
+    {
+        $this->showSources = true;
+        $this->sourceSearch = '';
+        $this->pickedFiles = [];
+    }
+
+    /** Offcanvas „Anhänge“ geschlossen: Auswahl verwerfen, Quellen nicht mehr abfragen */
+    public function closeSources(): void
+    {
+        $this->showSources = false;
         $this->sourceSearch = '';
         $this->pickedFiles = [];
     }
@@ -506,8 +657,8 @@ class MailComposer extends Component
             }
         }
 
-        $this->pickedFiles = [];
-        $this->showSources = false;
+        $this->closeSources();
+        $this->dispatch('nfmailer-sources-hide');
     }
 
     /** Checkbox eines übergebenen Anhangs in der rechten Spalte */

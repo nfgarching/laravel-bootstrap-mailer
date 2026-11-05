@@ -1,5 +1,6 @@
 <?php
 
+use Nfgarching\Mailer\Sources\FavoriteRecipientSource;
 use Nfgarching\Mailer\Sources\ModelRecipientSource;
 
 return [
@@ -20,6 +21,18 @@ return [
         [
             'class' => 'App\\Mail\\Recipients\\AkteBeteiligteSource',
             'label' => 'Beteiligte der Akte',
+        ],
+
+        // Favoriten (Tabelle mail_favorites): gemeinsame + persönliche des Users
+        [
+            'class' => FavoriteRecipientSource::class,
+            'label' => 'Favoriten',
+        ],
+
+        // Bearbeiter: Logins mit users.bearbeiter_id (Adresse = Login-E-Mail)
+        [
+            'class' => 'App\\Mail\\Recipients\\BearbeiterSource',
+            'label' => 'Bearbeiter',
         ],
 
         // Adressbuch: E-Mail-Adressen der Namen (Legacy-Tabelle NamenKom)
@@ -43,6 +56,18 @@ return [
     'search' => [
         'min_chars' => 2,
         'limit'     => 12,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Favoriten (Seite nfmailer.favorites)
+    |--------------------------------------------------------------------------
+    | Persönliche Favoriten pflegt jeder User selbst. Gemeinsame Favoriten
+    | (für alle) nur User mit einer dieser Rollen (spatie/laravel-permission);
+    | ohne spatie darf jeder angemeldete User sie pflegen.
+    */
+    'favorites' => [
+        'manage_roles' => ['Administrator', 'Partner'],
     ],
 
     // Eigentlicher Versandweg: null = Standard-Mailer aus config/mail.php.

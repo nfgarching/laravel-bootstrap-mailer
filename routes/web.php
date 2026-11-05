@@ -10,6 +10,13 @@ Route::middleware(['web', 'auth'])
     ->get('compose', MailComposer::class)
     ->name('nfmailer.compose');
 
+// Favoriten des Empfänger-Modals (persönliche + gemeinsame)
+Route::middleware(['web', 'auth'])
+    ->prefix(config('nfmailer.route_prefix', 'nfmailer'))
+    ->group(function () {
+        Route::view('favorites', 'nfmailer::pages.favorites')->name('nfmailer.favorites');
+    });
+
 // Öffentlich: Empfänger haben kein Login. Schutz über 48-stelliges Zufallstoken
 // (nur als Hash gespeichert), Ablaufdatum, optionale PIN und Rate-Limit.
 Route::middleware('web')

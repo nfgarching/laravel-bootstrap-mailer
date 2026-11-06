@@ -97,6 +97,9 @@ class MailComposer extends Component
     /** S/MIME-Verschlüsselung (nur wirksam, wenn alle Empfänger ein Zertifikat haben) */
     public bool $encrypt = true;
 
+    /** Gesendete Mail ablegen (nfmailer.archive; die Anwendung wertet MailSent aus) */
+    public bool $archive = false;
+
     /** Ergebnis der letzten Zertifikatssuche in den CA-Verzeichnissen, je Adresse eine Zeile */
     public array $lookupResults = [];
 
@@ -121,7 +124,7 @@ class MailComposer extends Component
             return;
         }
 
-        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'attachments', 'attachments_label']))
+        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'archive', 'attachments', 'attachments_label']))
             ->map(fn ($v) => is_string($v) && json_validate($v) && is_array($decoded = json_decode($v, true)) ? $decoded : $v)
             ->all();
 
@@ -145,6 +148,7 @@ class MailComposer extends Component
         $this->asLinks = (bool) ($options['links'] ?? config('nfmailer.links.default', false));
         $this->usePin = (bool) ($options['pin'] ?? config('nfmailer.links.pin_default', true));
         $this->encrypt = (bool) ($options['encrypt'] ?? true);
+        $this->archive = (bool) ($options['archive'] ?? config('nfmailer.archive.default', true));
 
         foreach (array_keys(self::FIELDS) as $field) {
             foreach ((array) ($options[$field] ?? []) as $value) {
@@ -618,6 +622,7 @@ class MailComposer extends Component
             'signed' => $security['signs'],
             'encrypted' => $encrypt,
             'pin' => $pin,
+            'archive' => config('nfmailer.archive.enabled', false) && $this->archive,
             'context' => $this->context,
             'context_key' => SentMail::contextKey($this->context),
         ]);
@@ -645,12 +650,15 @@ class MailComposer extends Component
         ))
             ->to($this->addressList($this->to))
             ->cc($this->addressList($this->cc))
-            ->bcc($this->addressList($this->bcc));
+            ->bcc($this->addressList($this->bcc))
+            ->forLog($log);
 
         try {
             if ($queue) {
-                Mail::mailer('nfmailer')->queue($mail);
+                // Status vorher setzen: Der Listener RecordSentMail zieht ihn nach dem
+                // Versand auf „sent“ – bei QUEUE_CONNECTION=sync noch während queue().
                 $log->update(['status' => 'queued']);
+                Mail::mailer('nfmailer')->queue($mail);
             } else {
                 $sent = Mail::mailer('nfmailer')->send($mail);
                 $log->update([

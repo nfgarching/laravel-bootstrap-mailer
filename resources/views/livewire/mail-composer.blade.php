@@ -399,6 +399,17 @@
                             @endif
                         </div>
                     @endif
+
+                    {{-- Ablage der gesendeten Mail (Auswertung durch die Anwendung, Ereignis MailSent) --}}
+                    @if (config('nfmailer.archive.enabled'))
+                        <div class="form-check form-switch mt-2 mb-0 small">
+                            <input class="form-check-input" type="checkbox" role="switch" id="nfmArchive"
+                                wire:model="archive">
+                            <label class="form-check-label" for="nfmArchive">
+                                <i class="bi bi-archive"></i> {{ config('nfmailer.archive.label') }}
+                            </label>
+                        </div>
+                    @endif
                 </div>
 
                 {{-- ============================================ Rechte Spalte: Auswahl --}}

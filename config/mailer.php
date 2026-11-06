@@ -110,6 +110,17 @@ return [
     // true = Versand über die Queue (Worker nötig)
     'queue' => (bool) env('NFMAILER_QUEUE', false),
 
+    /*
+    | Gesendete Mail ablegen: Schalter im Modal (Option 'archive' von nfmailer-open
+    | überschreibt die Vorgabe). Nach dem Versand löst der mailer das Ereignis
+    | Nfgarching\Mailer\Events\MailSent aus; die Anwendung legt die Mail dann ab.
+    */
+    'archive' => [
+        'enabled' => (bool) env('NFMAILER_ARCHIVE', false),
+        'default' => (bool) env('NFMAILER_ARCHIVE_DEFAULT', true),
+        'label'   => env('NFMAILER_ARCHIVE_LABEL', 'Gesendete Mail ablegen'),
+    ],
+
     'reply_to' => [
         'address' => env('NFMAILER_REPLY_TO'),
         'name'    => env('NFMAILER_REPLY_TO_NAME'),

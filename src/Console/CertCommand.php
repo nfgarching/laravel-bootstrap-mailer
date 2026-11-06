@@ -33,12 +33,12 @@ class CertCommand extends Command
         return match ($this->argument('action')) {
             'import' => $this->import($store),
             'lookup' => $this->lookup($store),
-            'list'   => $this->list($store),
-            'show'   => $this->show($store),
+            'list' => $this->list($store),
+            'show' => $this->show($store),
             'verify' => $this->verify($store),
-            'trust'  => $this->trust($store),
+            'trust' => $this->trust($store),
             'remove' => $this->remove($store),
-            default  => $this->fail('Unbekannte Aktion. Erlaubt: import, lookup, list, show, verify, trust, remove'),
+            default => $this->fail('Unbekannte Aktion. Erlaubt: import, lookup, list, show, verify, trust, remove'),
         };
     }
 
@@ -61,13 +61,13 @@ class CertCommand extends Command
         try {
             ['imported' => $info, 'log' => $log] = $store->importFromDirectory($email, $directory);
         } catch (Throwable $e) {
-            $this->error('Gefunden, aber nicht übernommen: ' . $e->getMessage());
+            $this->error('Gefunden, aber nicht übernommen: '.$e->getMessage());
 
             return self::FAILURE;
         }
 
         foreach ($log as $line) {
-            $this->line('  ' . $line);
+            $this->line('  '.$line);
         }
 
         if (! $info) {
@@ -76,7 +76,7 @@ class CertCommand extends Command
             return self::FAILURE;
         }
 
-        $this->info('Importiert für: ' . implode(', ', $info['emails']));
+        $this->info('Importiert für: '.implode(', ', $info['emails']));
         $this->details($info);
         $this->statusLines($info['status'] ?? []);
 
@@ -102,7 +102,7 @@ class CertCommand extends Command
         }
 
         foreach ($imported as $info) {
-            $this->info('Importiert für: ' . implode(', ', $info['emails']));
+            $this->info('Importiert für: '.implode(', ', $info['emails']));
             $this->details($info);
             $this->statusLines($info['status'] ?? []);
         }
@@ -148,7 +148,7 @@ class CertCommand extends Command
 
         $this->line("<options=bold>{$email}</>");
         $this->details($info);
-        $this->line('  Status:      ' . ($info['expired'] ? '<fg=red>abgelaufen</>' : '<fg=green>gültig</>'));
+        $this->line('  Status:      '.($info['expired'] ? '<fg=red>abgelaufen</>' : '<fg=green>gültig</>'));
         $this->statusLines($store->status($email));
 
         if ($reason = $store->unusableReason($email)) {
@@ -217,7 +217,7 @@ class CertCommand extends Command
 
             $found++;
             $info = $store->inspect($pem);
-            $this->line('<options=bold>' . ($d['subject']['CN'] ?? $info['subject']) . '</>');
+            $this->line('<options=bold>'.($d['subject']['CN'] ?? $info['subject']).'</>');
             $this->line("  Gültig bis:  {$info['valid_to']}");
             $this->line("  SHA-256:     {$info['fingerprint']}");
 
@@ -226,7 +226,7 @@ class CertCommand extends Command
             }
 
             is_dir($dir) || mkdir($dir, 0750, true);
-            file_put_contents($dir . '/' . strtolower(str_replace(':', '', substr($info['fingerprint'], 0, 23))) . '.pem', $pem);
+            file_put_contents($dir.'/'.strtolower(str_replace(':', '', substr($info['fingerprint'], 0, 23))).'.pem', $pem);
             $added++;
         }
 
@@ -251,15 +251,15 @@ class CertCommand extends Command
             return;
         }
 
-        $this->line('  Kette:       ' . ($status['chain_ok'] ? '<fg=green>✔</> ' : '<fg=yellow>!</> ') . $status['chain_message']);
+        $this->line('  Kette:       '.($status['chain_ok'] ? '<fg=green>✔</> ' : '<fg=yellow>!</> ').$status['chain_message']);
 
         $icon = match ($status['ocsp_status']) {
-            'good'    => '<fg=green>✔</> ',
+            'good' => '<fg=green>✔</> ',
             'revoked' => '<fg=red>✘</> ',
-            default   => '<fg=yellow>?</> ',
+            default => '<fg=yellow>?</> ',
         };
-        $this->line('  Sperrstatus: ' . $icon . $status['ocsp_message']
-            . ' (' . date('d.m.Y H:i', (int) $status['checked_at']) . ')');
+        $this->line('  Sperrstatus: '.$icon.$status['ocsp_message']
+            .' ('.date('d.m.Y H:i', (int) $status['checked_at']).')');
     }
 
     protected function shortStatus(array $status): string
@@ -272,8 +272,8 @@ class CertCommand extends Command
         }
 
         return ($status['chain_ok'] ? '<fg=green>Kette ✔</>' : '<fg=yellow>Kette ?</>')
-            . ' · ' . match ($status['ocsp_status']) {
-                'good'  => '<fg=green>OCSP ✔</>',
+            .' · '.match ($status['ocsp_status']) {
+                'good' => '<fg=green>OCSP ✔</>',
                 default => '<fg=yellow>OCSP ?</>',
             };
     }

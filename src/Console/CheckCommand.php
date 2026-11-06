@@ -114,10 +114,10 @@ class CheckCommand extends Command
         if ($verifier) {
             ($trust['ocsp'] ?? true) && ! $verifier->openssl()
                 ? $this->bad('Befehl „openssl“ fehlt – keine OCSP-Sperrprüfung möglich (im Dockerfile: apt-get install -y openssl).')
-                : $this->good('Sperrprüfung per OCSP ' . (($trust['ocsp'] ?? true) ? 'aktiv' : 'abgeschaltet') . ', Kettenprüfung: ' . ($trust['chain'] ?? 'warn') . '.');
+                : $this->good('Sperrprüfung per OCSP '.(($trust['ocsp'] ?? true) ? 'aktiv' : 'abgeschaltet').', Kettenprüfung: '.($trust['chain'] ?? 'warn').'.');
 
-            $roots = count(glob(rtrim((string) ($trust['roots'] ?? ''), '/') . '/*.pem') ?: []);
-            $this->line('  Vertrauensspeicher: ' . (($trust['system_roots'] ?? true) ? 'System' : '–') . " + {$roots} eigene Wurzel(n)");
+            $roots = count(glob(rtrim((string) ($trust['roots'] ?? ''), '/').'/*.pem') ?: []);
+            $this->line('  Vertrauensspeicher: '.(($trust['system_roots'] ?? true) ? 'System' : '–')." + {$roots} eigene Wurzel(n)");
         } else {
             $this->warn_('Empfänger-Zertifikate werden nicht bei der CA geprüft (smime.trust).');
         }
@@ -130,7 +130,7 @@ class CheckCommand extends Command
         }
 
         $all = $store->all();
-        $this->line('  Empfänger-Zertifikate: ' . count($all));
+        $this->line('  Empfänger-Zertifikate: '.count($all));
 
         $expired = array_column(array_filter($all, fn ($x) => $x['expired']), 'email');
         $revoked = array_column(array_filter($all, fn ($x) => ($x['status']['ocsp_status'] ?? null) === 'revoked'), 'email');
@@ -139,19 +139,19 @@ class CheckCommand extends Command
         $stale = array_column(array_filter($all, fn ($x) => $x['status']
             && time() - (int) $x['status']['checked_at'] > 86400 * 30), 'email');
 
-        $expired && $this->warn_('Abgelaufen: ' . implode(', ', $expired));
-        $revoked && $this->bad('GESPERRT (werden nicht verwendet): ' . implode(', ', $revoked));
-        $untrusted && $this->warn_('Aussteller nicht vertrauenswürdig: ' . implode(', ', $untrusted)
-            . (($trust['chain'] ?? 'warn') === 'require' ? ' (werden nicht verwendet)' : ''));
-        $verifier && $unchecked && $this->warn_('Noch nie geprüft: ' . implode(', ', $unchecked) . ' → nfmailer:check --verify');
-        $stale && $this->warn_('Letzte Prüfung älter als 30 Tage: ' . implode(', ', $stale) . ' → nfmailer:check --verify');
+        $expired && $this->warn_('Abgelaufen: '.implode(', ', $expired));
+        $revoked && $this->bad('GESPERRT (werden nicht verwendet): '.implode(', ', $revoked));
+        $untrusted && $this->warn_('Aussteller nicht vertrauenswürdig: '.implode(', ', $untrusted)
+            .(($trust['chain'] ?? 'warn') === 'require' ? ' (werden nicht verwendet)' : ''));
+        $verifier && $unchecked && $this->warn_('Noch nie geprüft: '.implode(', ', $unchecked).' → nfmailer:check --verify');
+        $stale && $this->warn_('Letzte Prüfung älter als 30 Tage: '.implode(', ', $stale).' → nfmailer:check --verify');
     }
 
     protected function smimeSigning(array $c, string $from, CertificateStore $store): void
     {
         foreach (['certificate' => 'Zertifikat', 'key' => 'Privater Schlüssel'] as $k => $label) {
             if (empty($c[$k]) || ! is_readable($c[$k])) {
-                $this->bad("{$label} nicht lesbar: " . ($c[$k] ?? '–'));
+                $this->bad("{$label} nicht lesbar: ".($c[$k] ?? '–'));
 
                 return;
             }
@@ -159,7 +159,7 @@ class CheckCommand extends Command
 
         // Schlüsseldatei darf nur für den Eigentümer lesbar sein
         if (DIRECTORY_SEPARATOR === '/' && (fileperms($c['key']) & 0o077)) {
-            $this->warn_('Der private Schlüssel ist für andere lesbar. Empfohlen: chmod 600 ' . $c['key']);
+            $this->warn_('Der private Schlüssel ist für andere lesbar. Empfohlen: chmod 600 '.$c['key']);
         }
 
         $info = $store->inspect((string) file_get_contents($c['certificate']));
@@ -180,17 +180,17 @@ class CheckCommand extends Command
         }
 
         if ($from && ! in_array(mb_strtolower($from), $info['emails'], true)) {
-            $this->bad("Absender {$from} steht nicht im Zertifikat (" . implode(', ', $info['emails']) . '). Empfänger sehen die Signatur als ungültig.');
+            $this->bad("Absender {$from} steht nicht im Zertifikat (".implode(', ', $info['emails']).'). Empfänger sehen die Signatur als ungültig.');
         }
 
-        $key = @openssl_pkey_get_private('file://' . realpath($c['key']), $c['passphrase'] ?? '');
+        $key = @openssl_pkey_get_private('file://'.realpath($c['key']), $c['passphrase'] ?? '');
         if (! $key) {
             $this->bad('Privater Schlüssel lässt sich nicht öffnen (Passphrase?).');
 
             return;
         }
 
-        if (! openssl_x509_check_private_key('file://' . realpath($c['certificate']), $key)) {
+        if (! openssl_x509_check_private_key('file://'.realpath($c['certificate']), $key)) {
             $this->bad('Zertifikat und privater Schlüssel passen nicht zusammen.');
 
             return;
@@ -198,11 +198,11 @@ class CheckCommand extends Command
 
         // Probe-Signatur
         try {
-            $mail = (new Email())->from($from ?: 'test@example.com')->to('test@example.com')->subject('Test')->text('Test');
+            $mail = (new Email)->from($from ?: 'test@example.com')->to('test@example.com')->subject('Test')->text('Test');
             (new SMimeSigner($c['certificate'], $c['key'], ($c['passphrase'] ?? null) ?: null, ($c['extra_certs'] ?? null) ?: null))->sign($mail);
             $this->good('Probe-Signatur erfolgreich.');
         } catch (Throwable $e) {
-            $this->bad('Probe-Signatur fehlgeschlagen: ' . $e->getMessage());
+            $this->bad('Probe-Signatur fehlgeschlagen: '.$e->getMessage());
         }
 
         if (empty($c['extra_certs'])) {
@@ -223,7 +223,7 @@ class CheckCommand extends Command
 
         $days = (int) config('nfmailer.links.expires_days', 14);
         $days === 0 || $days > 30
-            ? $this->warn_('Links laufen ' . ($days === 0 ? 'nie' : "erst nach {$days} Tagen") . ' ab.')
+            ? $this->warn_('Links laufen '.($days === 0 ? 'nie' : "erst nach {$days} Tagen").' ab.')
             : $this->good("Links laufen nach {$days} Tagen ab.");
 
         config('nfmailer.links.pin_default', true)
@@ -268,7 +268,7 @@ class CheckCommand extends Command
 
         $dmarc = collect($txt("_dmarc.{$domain}"))->first(fn ($r) => str_starts_with(strtolower($r), 'v=dmarc1'));
         if (! $dmarc) {
-            $this->bad('Kein DMARC-Eintrag (_dmarc). Einstieg: v=DMARC1; p=none; rua=mailto:dmarc@' . $domain);
+            $this->bad('Kein DMARC-Eintrag (_dmarc). Einstieg: v=DMARC1; p=none; rua=mailto:dmarc@'.$domain);
         } elseif (preg_match('/p=none/i', $dmarc)) {
             $this->warn_("DMARC nur Beobachtung (p=none): {$dmarc}");
         } else {

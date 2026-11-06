@@ -23,10 +23,10 @@ class MailLink extends Model
     protected $hidden = ['token', 'pin_hash'];
 
     protected $casts = [
-        'expires_at'         => 'datetime',
-        'revoked_at'         => 'datetime',
+        'expires_at' => 'datetime',
+        'revoked_at' => 'datetime',
         'last_downloaded_at' => 'datetime',
-        'notified_at'        => 'datetime',
+        'notified_at' => 'datetime',
     ];
 
     /** Klartext-Token, nur im Speicher direkt nach issue() */
@@ -39,13 +39,13 @@ class MailLink extends Model
         $max = config('nfmailer.links.max_downloads');
 
         $link = self::create([
-            'sent_mail_id'  => $sentMailId,
-            'token'         => self::hashToken($token),
-            'disk'          => $file['disk'],
-            'path'          => $file['path'],
-            'name'          => $file['name'],
-            'pin_hash'      => $pin !== null ? Hash::make($pin) : null,
-            'expires_at'    => $days > 0 ? now()->addDays($days) : null,
+            'sent_mail_id' => $sentMailId,
+            'token' => self::hashToken($token),
+            'disk' => $file['disk'],
+            'path' => $file['path'],
+            'name' => $file['name'],
+            'pin_hash' => $pin !== null ? Hash::make($pin) : null,
+            'expires_at' => $days > 0 ? now()->addDays($days) : null,
             'max_downloads' => $max ? (int) $max : null,
         ]);
 
@@ -92,11 +92,11 @@ class MailLink extends Model
     public function unavailableReason(): ?string
     {
         return match (true) {
-            $this->revoked_at !== null                     => 'Der Link wurde gesperrt.',
-            $this->expires_at?->isPast() === true          => 'Der Link ist abgelaufen.',
+            $this->revoked_at !== null => 'Der Link wurde gesperrt.',
+            $this->expires_at?->isPast() === true => 'Der Link ist abgelaufen.',
             $this->max_downloads !== null
                 && $this->download_count >= $this->max_downloads => 'Die Datei wurde bereits heruntergeladen. Der Link ist nicht mehr gültig.',
-            default                                        => null,
+            default => null,
         };
     }
 

@@ -17,19 +17,19 @@ class SentMail extends Model
      * Folge: keine SQL-Suche über Betreff/Text/Empfänger; Filtern über context_key.
      */
     protected $casts = [
-        'subject'     => 'encrypted',
-        'body'        => 'encrypted',
-        'to'          => 'encrypted:array',
-        'cc'          => 'encrypted:array',
-        'bcc'         => 'encrypted:array',
+        'subject' => 'encrypted',
+        'body' => 'encrypted',
+        'to' => 'encrypted:array',
+        'cc' => 'encrypted:array',
+        'bcc' => 'encrypted:array',
         'attachments' => 'encrypted:array',
-        'pin'         => 'encrypted',
-        'context'     => 'array',
-        'as_links'    => 'boolean',
-        'signed'      => 'boolean',
-        'encrypted'   => 'boolean',
-        'archive'     => 'boolean',
-        'sent_at'     => 'datetime',
+        'pin' => 'encrypted',
+        'context' => 'array',
+        'as_links' => 'boolean',
+        'signed' => 'boolean',
+        'encrypted' => 'boolean',
+        'archive' => 'boolean',
+        'sent_at' => 'datetime',
     ];
 
     protected $hidden = ['pin'];
@@ -53,6 +53,6 @@ class SentMail extends Model
 
         $key = array_key_first($context);
 
-        return is_scalar($context[$key]) ? $key . ':' . $context[$key] : null;
+        return is_scalar($context[$key]) ? $key.':'.$context[$key] : null;
     }
 }

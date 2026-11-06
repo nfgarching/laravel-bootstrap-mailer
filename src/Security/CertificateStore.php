@@ -17,8 +17,8 @@ use RuntimeException;
 class CertificateStore
 {
     /**
-     * @param array{chain?: string, check_before_send?: bool, cache_hours?: int} $policy
-     *        chain: 'require' = nur Zertifikate mit geprüfter Kette, 'warn' = übernehmen mit Hinweis, 'off'
+     * @param  array{chain?: string, check_before_send?: bool, cache_hours?: int}  $policy
+     *                                                                                      chain: 'require' = nur Zertifikate mit geprüfter Kette, 'warn' = übernehmen mit Hinweis, 'off'
      */
     public function __construct(
         protected string $directory,
@@ -61,7 +61,7 @@ class CertificateStore
             return 'Zertifikat unlesbar';
         }
         if ($info['expired']) {
-            return 'abgelaufen am ' . $info['valid_to'];
+            return 'abgelaufen am '.$info['valid_to'];
         }
 
         $status = $this->status($email);
@@ -133,7 +133,7 @@ class CertificateStore
 
     /**
      * @param  list<string>  $emails
-     * @return list<string>  Adressen ohne gültiges Zertifikat
+     * @return list<string> Adressen ohne gültiges Zertifikat
      */
     public function missing(array $emails): array
     {
@@ -181,7 +181,7 @@ class CertificateStore
             }
 
             if ($info['expired']) {
-                $expired[] = implode(', ', $emails) . ' (abgelaufen am ' . $info['valid_to'] . ')';
+                $expired[] = implode(', ', $emails).' (abgelaufen am '.$info['valid_to'].')';
 
                 continue;
             }
@@ -189,13 +189,13 @@ class CertificateStore
             $status = $this->verifier ? $this->check($pem, $intermediates) : null;
 
             if ($status && $status['ocsp_status'] === CertificateVerifier::REVOKED) {
-                $rejected[] = implode(', ', $emails) . ': ' . $status['ocsp_message'];
+                $rejected[] = implode(', ', $emails).': '.$status['ocsp_message'];
 
                 continue;
             }
             if ($status && ! $status['chain_ok'] && ($this->policy['chain'] ?? 'warn') === 'require') {
-                $rejected[] = implode(', ', $emails) . ': ' . $status['chain_message']
-                    . ' (Wurzelzertifikat mit „nfmailer:cert trust“ hinterlegen?)';
+                $rejected[] = implode(', ', $emails).': '.$status['chain_message']
+                    .' (Wurzelzertifikat mit „nfmailer:cert trust“ hinterlegen?)';
 
                 continue;
             }
@@ -205,15 +205,15 @@ class CertificateStore
 
         if (! $candidates) {
             throw new RuntimeException(match (true) {
-                (bool) $rejected    => 'Nicht übernommen – ' . implode('; ', $rejected),
-                (bool) $expired     => 'Nur abgelaufene Zertifikate gefunden: ' . implode('; ', $expired),
+                (bool) $rejected => 'Nicht übernommen – '.implode('; ', $rejected),
+                (bool) $expired => 'Nur abgelaufene Zertifikate gefunden: '.implode('; ', $expired),
                 $onlyEmail !== null => "Kein Zertifikat für {$onlyEmail} in der Datei.",
-                default             => 'Kein Zertifikat mit E-Mail-Adresse in der Datei gefunden.',
+                default => 'Kein Zertifikat mit E-Mail-Adresse in der Datei gefunden.',
             });
         }
 
         if (! is_dir($this->directory) && ! mkdir($this->directory, 0750, true) && ! is_dir($this->directory)) {
-            throw new RuntimeException('Verzeichnis kann nicht angelegt werden: ' . $this->directory);
+            throw new RuntimeException('Verzeichnis kann nicht angelegt werden: '.$this->directory);
         }
 
         $result = [];
@@ -285,7 +285,7 @@ class CertificateStore
      * alte, abgelaufene Zertifikate derselben Person).
      *
      * @return array{imported: ?array, log: list<string>}
-     *         imported: wie import()[0], null wenn nichts Verwendbares gefunden wurde
+     *                                                    imported: wie import()[0], null wenn nichts Verwendbares gefunden wurde
      *
      * @throws RuntimeException gefundene Zertifikate wurden alle abgelehnt (gesperrt, Kette …)
      */
@@ -361,7 +361,7 @@ class CertificateStore
 
         // PEM-Zertifikate (eins oder mehrere)
         if (preg_match_all('/-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----/s', $contents, $m)) {
-            return array_map(fn ($c) => $c . "\n", $m[0]);
+            return array_map(fn ($c) => $c."\n", $m[0]);
         }
 
         // PKCS#7 als PEM
@@ -412,21 +412,18 @@ class CertificateStore
             if ($ok !== true) {
                 $errors = '';
                 while ($e = openssl_error_string()) {
-                    $errors .= $e . ' ';
+                    $errors .= $e.' ';
                 }
 
                 throw new RuntimeException(match (true) {
-                    str_contains($errors, 'signer certificate not found')
-                        => 'Die E-Mail wurde ohne mitgeschicktes Zertifikat signiert. Bitte den Absender um das Zertifikat als .cer-Datei bitten.',
-                    $ok === false
-                        => 'Die Signatur der E-Mail ist ungültig (Mail verändert?). Zertifikat nicht übernommen.',
-                    default
-                        => 'Die E-Mail enthält keine lesbare S/MIME-Signatur: ' . trim($errors),
+                    str_contains($errors, 'signer certificate not found') => 'Die E-Mail wurde ohne mitgeschicktes Zertifikat signiert. Bitte den Absender um das Zertifikat als .cer-Datei bitten.',
+                    $ok === false => 'Die Signatur der E-Mail ist ungültig (Mail verändert?). Zertifikat nicht übernommen.',
+                    default => 'Die E-Mail enthält keine lesbare S/MIME-Signatur: '.trim($errors),
                 });
             }
 
             preg_match_all('/-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----/s', (string) file_get_contents($out), $m);
-            $signers = array_map(fn ($c) => $c . "\n", $m[0]);
+            $signers = array_map(fn ($c) => $c."\n", $m[0]);
 
             // Mitgeschickte Zwischenzertifikate (für die Kettenprüfung) anhängen
             $all = self::fromPkcs7Pem((string) file_get_contents($p7));
@@ -461,7 +458,7 @@ class CertificateStore
     {
         $out = [];
 
-        foreach (glob(rtrim($this->directory, '/') . '/*.pem') ?: [] as $file) {
+        foreach (glob(rtrim($this->directory, '/').'/*.pem') ?: [] as $file) {
             $email = basename($file, '.pem');
             if ($info = $this->inspect((string) file_get_contents($file))) {
                 $out[] = ['email' => $email] + $info + ['status' => $this->status($email)];
@@ -483,11 +480,11 @@ class CertificateStore
         $ocsp = $this->verifier->ocsp($pem, $chain['intermediates']);
 
         return [
-            'chain_ok'      => $chain['ok'],
+            'chain_ok' => $chain['ok'],
             'chain_message' => $chain['message'],
-            'ocsp_status'   => $ocsp['status'],
-            'ocsp_message'  => $ocsp['message'],
-            'checked_at'    => $ocsp['checked_at'],
+            'ocsp_status' => $ocsp['status'],
+            'ocsp_message' => $ocsp['message'],
+            'checked_at' => $ocsp['checked_at'],
             'intermediates' => $chain['intermediates'],
         ];
     }
@@ -507,12 +504,12 @@ class CertificateStore
 
     protected function chainFile(string $email): string
     {
-        return substr($this->file($email), 0, -4) . '.chain';
+        return substr($this->file($email), 0, -4).'.chain';
     }
 
     protected function statusFile(string $email): string
     {
-        return substr($this->file($email), 0, -4) . '.status.json';
+        return substr($this->file($email), 0, -4).'.status.json';
     }
 
     /**
@@ -546,25 +543,25 @@ class CertificateStore
         $fingerprint = strtoupper(implode(':', str_split((string) openssl_x509_fingerprint($pem, 'sha256'), 2)));
 
         return [
-            'emails'   => array_values(array_unique(array_map(fn ($e) => mb_strtolower(trim($e)), $emails))),
-            'subject'  => is_array($subject) ? implode(', ', $subject) : (string) $subject,
-            'issuer'   => is_array($issuer) ? implode(', ', $issuer) : (string) $issuer,
+            'emails' => array_values(array_unique(array_map(fn ($e) => mb_strtolower(trim($e)), $emails))),
+            'subject' => is_array($subject) ? implode(', ', $subject) : (string) $subject,
+            'issuer' => is_array($issuer) ? implode(', ', $issuer) : (string) $issuer,
             'fingerprint' => $fingerprint,
             'valid_to' => date('d.m.Y', (int) $data['validTo_time_t']),
             'valid_to_ts' => (int) $data['validTo_time_t'],
-            'expired'  => (int) $data['validTo_time_t'] < time(),
+            'expired' => (int) $data['validTo_time_t'] < time(),
         ];
     }
 
     protected static function wrap(string $der, string $type): string
     {
-        return "-----BEGIN {$type}-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END {$type}-----\n";
+        return "-----BEGIN {$type}-----\n".chunk_split(base64_encode($der), 64, "\n")."-----END {$type}-----\n";
     }
 
     protected function file(string $email): string
     {
         $name = preg_replace('/[^a-z0-9@._+-]/', '_', mb_strtolower(trim($email)));
 
-        return rtrim($this->directory, '/') . '/' . $name . '.pem';
+        return rtrim($this->directory, '/').'/'.$name.'.pem';
     }
 }

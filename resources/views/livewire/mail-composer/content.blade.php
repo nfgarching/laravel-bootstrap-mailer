@@ -23,7 +23,7 @@
     @if ($result)
         @include('nfmailer::livewire.mail-composer.result')
     @else
-        <div x-show="view === 'compose'">
+        <div class="nfm-compose" x-show="view === 'compose'">
             @include('nfmailer::livewire.mail-composer.recipients')
             @include('nfmailer::livewire.mail-composer.body')
             @include('nfmailer::livewire.mail-composer.attachments')

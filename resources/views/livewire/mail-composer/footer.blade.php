@@ -4,16 +4,10 @@
 @else
     @php
         $total = count($to) + count($cc) + count($bcc);
-        $hasAttachments = count(array_filter($attachments, fn ($a) => $a['active'] ?? true)) || count($uploads);
+        $hasAttachments = count(array_filter($attachments, fn($a) => $a['active'] ?? true)) || count($uploads);
     @endphp
 
     <div class="d-flex flex-wrap align-items-center gap-2 me-auto small">
-        <span class="text-body-secondary">
-            {{ $total }} Empfänger
-            @if (count($cc) || count($bcc))
-                ({{ count($to) }} An · {{ count($cc) }} CC · {{ count($bcc) }} BCC)
-            @endif
-        </span>
 
         {{-- Status-Badges: Klick führt zu den Versandoptionen --}}
         <button type="button" class="btn btn-link p-0 text-decoration-none d-inline-flex gap-1"
@@ -23,7 +17,8 @@
             @endif
             @if ($sec['canEncrypt'] && $encrypt)
                 @if ($sec['encryptPossible'])
-                    <span class="badge text-bg-light border"><i class="bi bi-lock-fill text-success"></i> verschlüsselt</span>
+                    <span class="badge text-bg-light border"><i class="bi bi-lock-fill text-success"></i>
+                        verschlüsselt</span>
                 @elseif ($sec['missing'])
                     <span class="badge text-bg-warning"><i class="bi bi-unlock"></i> nicht verschlüsselbar
                         ({{ count($sec['missing']) }})</span>
@@ -36,8 +31,8 @@
         </button>
     </div>
 
-    <button type="button" class="btn btn-outline-secondary" x-show="view === 'compose'"
-        x-on:click="view = 'options'" title="Versandoptionen: Download-Links, PIN, Verschlüsselung">
+    <button type="button" class="btn btn-outline-secondary" x-show="view === 'compose'" x-on:click="view = 'options'"
+        title="Versandoptionen: Download-Links, PIN, Verschlüsselung">
         <i class="bi bi-gear"></i><span class="d-none d-sm-inline ms-1">Optionen</span>
     </button>
     <button type="button" class="btn btn-outline-secondary" x-show="view === 'options'" x-cloak
@@ -46,12 +41,14 @@
     </button>
 
     <button type="button" class="btn btn-outline-secondary"
-        @if ($page) onclick="window.close()" @else data-bs-dismiss="modal" @endif>Abbrechen</button>
+        @if ($page) onclick="window.close()" @else data-bs-dismiss="modal" @endif>
+        Abbrechen
+    </button>
     <button type="button" class="btn btn-outline-primary" wire:click="mailto"
         x-on:nfmailer-mailto.window="window.location.href = $event.detail.url"
         title="Im Standard-Mailprogramm öffnen (ohne Anhänge, ohne Protokoll)" wire:loading.attr="disabled"
         wire:target="mailto,send,newUploads">
-        <i class="bi bi-box-arrow-up-right"></i><span class="d-none d-sm-inline ms-1">Mailprogramm</span>
+        <i class="bi bi-box-arrow-up-right"></i><span class="d-none d-sm-inline ms-1">MailTo</span>
     </button>
     <button type="button" class="btn btn-primary" wire:click="send" wire:loading.attr="disabled"
         wire:target="send,newUploads">

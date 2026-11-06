@@ -14,11 +14,13 @@ namespace Nfgarching\Mailer\Security;
 class CertificateVerifier
 {
     public const GOOD = 'good';
+
     public const REVOKED = 'revoked';
+
     public const UNKNOWN = 'unknown';
 
     /**
-     * @param array{roots?: ?string, system_roots?: bool, ocsp?: bool, timeout?: int, openssl?: string} $config
+     * @param  array{roots?: ?string, system_roots?: bool, ocsp?: bool, timeout?: int, openssl?: string}  $config
      */
     public function __construct(protected array $config = []) {}
 
@@ -55,9 +57,9 @@ class CertificateVerifier
         }
 
         return match ($result) {
-            true    => ['ok' => true, 'message' => 'Kette bis zu vertrauenswürdiger Wurzel geprüft.', 'intermediates' => $intermediates],
-            false   => ['ok' => false, 'message' => 'Aussteller ist nicht vertrauenswürdig oder Kette unvollständig.', 'intermediates' => $intermediates],
-            default => ['ok' => false, 'message' => 'Kettenprüfung fehlgeschlagen: ' . (openssl_error_string() ?: 'unbekannter Fehler'), 'intermediates' => $intermediates],
+            true => ['ok' => true, 'message' => 'Kette bis zu vertrauenswürdiger Wurzel geprüft.', 'intermediates' => $intermediates],
+            false => ['ok' => false, 'message' => 'Aussteller ist nicht vertrauenswürdig oder Kette unvollständig.', 'intermediates' => $intermediates],
+            default => ['ok' => false, 'message' => 'Kettenprüfung fehlgeschlagen: '.(openssl_error_string() ?: 'unbekannter Fehler'), 'intermediates' => $intermediates],
         };
     }
 
@@ -77,7 +79,7 @@ class CertificateVerifier
 
         $roots = $this->config['roots'] ?? null;
         if ($roots && is_dir($roots)) {
-            foreach (glob(rtrim($roots, '/') . '/*.pem') ?: [] as $file) {
+            foreach (glob(rtrim($roots, '/').'/*.pem') ?: [] as $file) {
                 $out[] = $file;
             }
         }
@@ -189,7 +191,7 @@ class CertificateVerifier
             return $result(self::UNKNOWN, 'Der Befehl „openssl“ ist nicht installiert.');
         }
 
-        $dir = sys_get_temp_dir() . '/nfm-ocsp-' . bin2hex(random_bytes(6));
+        $dir = sys_get_temp_dir().'/nfm-ocsp-'.bin2hex(random_bytes(6));
         mkdir($dir, 0700);
         file_put_contents("$dir/leaf.pem", $leaf);
         file_put_contents("$dir/issuer.pem", $issuer);
@@ -214,14 +216,14 @@ class CertificateVerifier
             }
 
             return match ($status) {
-                'good'    => $result(self::GOOD, 'Nicht gesperrt (OCSP).'),
+                'good' => $result(self::GOOD, 'Nicht gesperrt (OCSP).'),
                 'revoked' => $result(self::REVOKED, 'Von der Zertifizierungsstelle GESPERRT'
-                    . (preg_match('/Revocation Time:\s*(.+)/', $out, $t) ? ' seit ' . trim($t[1]) : '') . '.'),
-                default   => $result(self::UNKNOWN, 'Der OCSP-Dienst kennt das Zertifikat nicht.'),
+                    .(preg_match('/Revocation Time:\s*(.+)/', $out, $t) ? ' seit '.trim($t[1]) : '').'.'),
+                default => $result(self::UNKNOWN, 'Der OCSP-Dienst kennt das Zertifikat nicht.'),
             };
         }
 
-        return $result(self::UNKNOWN, 'OCSP-Dienst nicht erreichbar oder Fehler: ' . trim(strtok($out, "\n") ?: "Exit {$code}"));
+        return $result(self::UNKNOWN, 'OCSP-Dienst nicht erreichbar oder Fehler: '.trim(strtok($out, "\n") ?: "Exit {$code}"));
     }
 
     // ------------------------------------------------------------------ Hilfen
@@ -230,7 +232,7 @@ class CertificateVerifier
     {
         $aia = (string) (openssl_x509_parse($cert)['extensions']['authorityInfoAccess'] ?? '');
 
-        return preg_match('/' . preg_quote($type, '/') . '\s*-\s*URI:(\S+)/i', $aia, $m) ? $m[1] : null;
+        return preg_match('/'.preg_quote($type, '/').'\s*-\s*URI:(\S+)/i', $aia, $m) ? $m[1] : null;
     }
 
     public function isCa(string $cert): bool
@@ -287,7 +289,7 @@ class CertificateVerifier
             return [-1, 'openssl konnte nicht gestartet werden'];
         }
 
-        $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+        $out = stream_get_contents($pipes[1]).stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
 

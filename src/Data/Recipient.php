@@ -29,9 +29,9 @@ final readonly class Recipient
     public function toArray(): array
     {
         return [
-            'email'  => $this->email,
-            'name'   => $this->name,
-            'hint'   => $this->hint,
+            'email' => $this->email,
+            'name' => $this->name,
+            'hint' => $this->hint,
             'source' => $this->source,
         ];
     }

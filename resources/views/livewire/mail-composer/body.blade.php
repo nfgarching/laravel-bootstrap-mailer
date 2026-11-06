@@ -7,12 +7,19 @@
     @enderror
 </div>
 
-<div class="mb-2" x-data="{ sig: false }">
-    <textarea id="nfmailer-body" class="form-control @error('body') is-invalid @enderror" rows="12" placeholder="Nachricht …"
-        wire:model="body" x-on:nfmailer-insert-transcript.window="nfmailerInsert(($event.detail.text ?? '').trim() + ' ')"></textarea>
+<div class="mb-2 nfm-body" x-data="{ sig: false }">
+    {{-- Höhe folgt dem Fenster (Flex-Kette in assets: modal-content → modal-body → nfm-compose → nfm-body) --}}
+    <textarea id="nfmailer-body" class="form-control nfm-body-text @error('body') is-invalid @enderror" rows="8"
+        placeholder="Nachricht …" wire:model="body"
+        x-on:nfmailer-insert-transcript.window="nfmailerInsert(($event.detail.text ?? '').trim() + ' ')"></textarea>
     @error('body')
         <div class="invalid-feedback">{{ $message }}</div>
     @enderror
+
+    @if (config('nfmailer.signature') && $useSignature)
+        <div class="form-text border-start ps-2 mt-1" style="white-space: pre-line" x-show="sig" x-cloak>– – –
+            {{ config('nfmailer.signature') }}</div>
+    @endif
 
     <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
         @if ($this->textbotAvailable)
@@ -28,16 +35,41 @@
             @include('textbot::livewire.partials.dictation', ['insert' => 'nfmailerInsert'])
         @endif
 
-        @if (config('nfmailer.signature'))
-            <button type="button" class="btn btn-link btn-sm text-decoration-none text-body-secondary ms-auto"
-                x-on:click="sig = !sig" :aria-expanded="sig">
-                Signatur <i class="bi" :class="sig ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
-            </button>
-        @endif
-    </div>
+        <div class="d-flex align-items-center gap-2 ms-auto">
 
-    @if (config('nfmailer.signature'))
-        <div class="form-text border-start ps-2 mt-1" style="white-space: pre-line" x-show="sig" x-cloak>– – –
-            {{ config('nfmailer.signature') }}</div>
-    @endif
+            {{-- Gesendete Mail ablegen: der mailer löst nach dem Versand MailSent aus, die Anwendung legt ab --}}
+            @if (config('nfmailer.archive.enabled', false))
+                <div class="form-check form-switch nfm-switch" title="{{ config('nfmailer.archive.label') }}">
+                    <input class="form-check-input" type="checkbox" role="switch" id="nfmArchive"
+                        wire:model.live="archive">
+                    &nbsp;
+                    <label class="form-check-label" for="nfmArchive">
+                        <i class="bi {{ $archive ? 'bi-archive-fill text-success' : 'bi-archive' }}"></i><span
+                            class="d-none d-sm-inline ms-1">Ablegen</span>
+                    </label>
+                </div>
+            @endif
+
+            @if (config('nfmailer.signature'))
+                <div class="form-check form-switch nfm-switch" title="Signatur anhängen">
+                    <input class="form-check-input" type="checkbox" role="switch" id="nfmSignature"
+                        wire:model.live="useSignature">
+                    &nbsp;
+                    <label class="form-check-label" for="nfmSignature">
+                        <i class="bi {{ $useSignature ? 'bi-pen-fill text-success' : 'bi-pen' }}"></i><span
+                            class="d-none d-sm-inline ms-1">Signatur</span>
+                    </label>
+                    @if ($useSignature)
+                        <button type="button"
+                            class="btn btn-link btn-sm text-decoration-none text-body-secondary p-0 ms-1"
+                            x-on:click="sig = !sig" :aria-expanded="sig" title="Signatur anzeigen">
+                            <i class="bi" :class="sig ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                        </button>
+                    @endif
+                </div>
+            @endif
+
+        </div>
+
+    </div>
 </div>

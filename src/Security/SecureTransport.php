@@ -26,7 +26,7 @@ class SecureTransport implements TransportInterface
     public const ENCRYPT_HEADER = 'X-Nfmailer-Encrypt';
 
     /**
-     * @param array{certificate?: ?string, key?: ?string, passphrase?: ?string, extra_certs?: ?string} $signing
+     * @param  array{certificate?: ?string, key?: ?string, passphrase?: ?string, extra_certs?: ?string}  $signing
      */
     public function __construct(
         protected TransportInterface $inner,
@@ -115,12 +115,12 @@ class SecureTransport implements TransportInterface
             $this->certificates->ensureFresh($email);
 
             $path = $this->certificates->path($email);
-            $path ? $paths[] = $path : $missing[] = $email . ' (' . $this->certificates->unusableReason($email) . ')';
+            $path ? $paths[] = $path : $missing[] = $email.' ('.$this->certificates->unusableReason($email).')';
         }
 
         if ($missing) {
-            throw new RuntimeException('Verschlüsselung nicht möglich: ' . implode(', ', $missing)
-                . '. Die Mail wurde nicht versendet.');
+            throw new RuntimeException('Verschlüsselung nicht möglich: '.implode(', ', $missing)
+                .'. Die Mail wurde nicht versendet.');
         }
 
         // Eigenes Zertifikat ergänzen, damit die Kopie in „Gesendet“ lesbar bleibt
@@ -133,6 +133,6 @@ class SecureTransport implements TransportInterface
 
     public function __toString(): string
     {
-        return 'nfmailer+' . $this->inner;
+        return 'nfmailer+'.$this->inner;
     }
 }

@@ -1,5 +1,6 @@
 {{-- Versandoptionen: Ansicht im Composer (Alpine view = 'options'), kein eigenes Modal --}}
 @php
+        $total = count($to) + count($cc) + count($bcc);
     $hasAttachments = count(array_filter($attachments, fn ($a) => $a['active'] ?? true)) || count($uploads);
 @endphp
 
@@ -94,4 +95,13 @@
             @endif
         </div>
     @endif
+
+        <span class="text-body-secondary">
+            {{ $total }} Empfänger
+            @if (count($cc) || count($bcc))
+                ({{ count($to) }} An · {{ count($cc) }} CC · {{ count($bcc) }} BCC)
+            @endif
+        </span>
+
+
 </div>

@@ -31,7 +31,7 @@ class PruneCommand extends Command
 
             $count = $query->count();
             $dry ?: $query->delete();
-            $this->line(($dry ? 'Würde ' : '') . "{$count} Download-Link(s) entfernen" . ($dry ? '.' : ' – entfernt.'));
+            $this->line(($dry ? 'Würde ' : '')."{$count} Download-Link(s) entfernen".($dry ? '.' : ' – entfernt.'));
         }
 
         // Uploads
@@ -55,7 +55,7 @@ class PruneCommand extends Command
                 }
             }
 
-            $this->line(($dry ? 'Würde ' : '') . "{$deleted} Upload(s) löschen" . ($dry ? '.' : ' – gelöscht.'));
+            $this->line(($dry ? 'Würde ' : '')."{$deleted} Upload(s) löschen".($dry ? '.' : ' – gelöscht.'));
         }
 
         return self::SUCCESS;

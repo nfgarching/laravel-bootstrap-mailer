@@ -15,7 +15,7 @@ namespace Nfgarching\Mailer\Security;
 class CertificateDirectory
 {
     /**
-     * @param list<array{name: string, uri: string, base: string}> $servers
+     * @param  list<array{name: string, uri: string, base: string}>  $servers
      */
     public function __construct(
         protected array $servers = [],
@@ -44,7 +44,7 @@ class CertificateDirectory
      * Alle Verzeichnisse nach Zertifikaten für $email durchsuchen.
      *
      * @return array{certificates: list<string>, log: list<string>}
-     *         certificates: gefundene Zertifikate (PEM), log: Ergebnis je Verzeichnis
+     *                                                              certificates: gefundene Zertifikate (PEM), log: Ergebnis je Verzeichnis
      */
     public function lookup(string $email): array
     {
@@ -57,10 +57,10 @@ class CertificateDirectory
 
             try {
                 $found = $this->search($server, $email);
-                $log[] = $name . ': ' . ($found ? count($found) . ' Zertifikat(e)' : 'nichts gefunden');
+                $log[] = $name.': '.($found ? count($found).' Zertifikat(e)' : 'nichts gefunden');
                 array_push($certificates, ...$found);
             } catch (\Throwable $e) {
-                $log[] = $name . ': nicht erreichbar (' . $e->getMessage() . ')';
+                $log[] = $name.': nicht erreichbar ('.$e->getMessage().')';
             }
         }
 
@@ -90,7 +90,7 @@ class CertificateDirectory
                 throw new \RuntimeException(ldap_error($ldap));
             }
 
-            $filter = '(mail=' . ldap_escape($email, '', LDAP_ESCAPE_FILTER) . ')';
+            $filter = '(mail='.ldap_escape($email, '', LDAP_ESCAPE_FILTER).')';
             $result = @ldap_search($ldap, $server['base'], $filter, ['userCertificate;binary', 'userSMIMECertificate;binary'], 0, 20, $this->timeout);
 
             if (! $result) {

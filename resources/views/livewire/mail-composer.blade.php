@@ -44,7 +44,7 @@
             x-on:hide-bs-modal.dot="$el.querySelectorAll('.offcanvas.show').forEach(o => bootstrap.Offcanvas.getInstance(o)?.hide())"
             x-on:show-bs-offcanvas.dot="side = true"
             x-on:hidden-bs-offcanvas.dot="side = !!$root.querySelector('.offcanvas.show')">
-            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-md-down nfm-dialog">
+            <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-md-down nfm-dialog">
                 <div class="modal-content">
                     @include('nfmailer::livewire.mail-composer.content')
                 </div>

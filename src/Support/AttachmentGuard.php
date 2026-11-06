@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 class AttachmentGuard
 {
     /**
-     * @param array{disk?: string, path: string, name?: string} $a
+     * @param  array{disk?: string, path: string, name?: string}  $a
      * @return array{disk: string, path: string, name: string, size: int, origin: string}|null
      */
     public static function check(array $a): ?array
@@ -47,10 +47,10 @@ class AttachmentGuard
         }
 
         return [
-            'disk'   => $disk,
-            'path'   => $path,
-            'name'   => $a['name'] ?? basename($path),
-            'size'   => (int) $storage->size($path),
+            'disk' => $disk,
+            'path' => $path,
+            'name' => $a['name'] ?? basename($path),
+            'size' => (int) $storage->size($path),
             'origin' => 'preset',
         ];
     }
@@ -58,7 +58,7 @@ class AttachmentGuard
     public static function humanSize(int $bytes): string
     {
         return $bytes >= 1048576
-            ? number_format($bytes / 1048576, 1, ',', '.') . ' MB'
-            : max(1, (int) round($bytes / 1024)) . ' KB';
+            ? number_format($bytes / 1048576, 1, ',', '.').' MB'
+            : max(1, (int) round($bytes / 1024)).' KB';
     }
 }

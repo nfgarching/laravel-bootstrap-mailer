@@ -55,7 +55,7 @@ return [
 
     'search' => [
         'min_chars' => 2,
-        'limit'     => 12,
+        'limit' => 12,
     ],
 
     /*
@@ -91,10 +91,10 @@ return [
     */
     'smime' => [
         'certificate' => env('NFMAILER_SMIME_CERT'),         // z. B. /var/secure/smime/kanzlei.crt
-        'key'         => env('NFMAILER_SMIME_KEY'),          // privater Schlüssel, Rechte 600, außerhalb des Webroots
-        'passphrase'  => env('NFMAILER_SMIME_PASSPHRASE'),
+        'key' => env('NFMAILER_SMIME_KEY'),          // privater Schlüssel, Rechte 600, außerhalb des Webroots
+        'passphrase' => env('NFMAILER_SMIME_PASSPHRASE'),
         'extra_certs' => env('NFMAILER_SMIME_CHAIN'),        // Zwischenzertifikate der CA (optional)
-        'encrypt'     => (bool) env('NFMAILER_SMIME_ENCRYPT', true),  // Option im Modal anbieten
+        'encrypt' => (bool) env('NFMAILER_SMIME_ENCRYPT', true),  // Option im Modal anbieten
         'certificates' => storage_path('app/private/nfmailer/certs'), // Zertifikate der Empfänger
 
         // Zertifikat des Absenders aus eingehenden signierten Mails übernehmen
@@ -119,16 +119,16 @@ return [
         'trust' => [
             // Vertrauenskette: 'require' = nur Zertifikate einer vertrauenswürdigen CA verwenden,
             // 'warn' = übernehmen und als „ungeprüft“ kennzeichnen, 'off' = nicht prüfen
-            'chain'        => env('NFMAILER_SMIME_CHAIN_POLICY', 'warn'),
+            'chain' => env('NFMAILER_SMIME_CHAIN_POLICY', 'warn'),
             'system_roots' => true,                                        // Zertifikatsspeicher des Systems nutzen
-            'roots'        => storage_path('app/private/nfmailer/roots'),  // zusätzliche Wurzeln (nfmailer:cert trust)
+            'roots' => storage_path('app/private/nfmailer/roots'),  // zusätzliche Wurzeln (nfmailer:cert trust)
 
             // Sperrstatus per OCSP (benötigt den Befehl „openssl“ und Internetzugang)
-            'ocsp'              => (bool) env('NFMAILER_SMIME_OCSP', true),
+            'ocsp' => (bool) env('NFMAILER_SMIME_OCSP', true),
             'check_before_send' => true,  // vor verschlüsseltem Versand erneut prüfen …
-            'cache_hours'       => 24,    // … wenn die letzte Prüfung älter ist
-            'timeout'           => 10,    // Sekunden je Abfrage
-            'openssl'           => env('NFMAILER_OPENSSL', 'openssl'),
+            'cache_hours' => 24,    // … wenn die letzte Prüfung älter ist
+            'timeout' => 10,    // Sekunden je Abfrage
+            'openssl' => env('NFMAILER_OPENSSL', 'openssl'),
         ],
     ],
 
@@ -143,18 +143,22 @@ return [
     'archive' => [
         'enabled' => (bool) env('NFMAILER_ARCHIVE', false),
         'default' => (bool) env('NFMAILER_ARCHIVE_DEFAULT', true),
-        'label'   => env('NFMAILER_ARCHIVE_LABEL', 'Gesendete Mail ablegen'),
+        'label' => env('NFMAILER_ARCHIVE_LABEL', 'Gesendete Mail ablegen'),
     ],
 
     'reply_to' => [
         'address' => env('NFMAILER_REPLY_TO'),
-        'name'    => env('NFMAILER_REPLY_TO_NAME'),
+        'name' => env('NFMAILER_REPLY_TO_NAME'),
     ],
 
     // Wird unter jede Mail gesetzt (leer = keine Signatur).
     // In der .env Zeilenumbrüche als \n schreiben, z. B.
     // NFMAILER_SIGNATURE="Kanzlei Muster\nMusterstraße 1\n12345 Musterstadt"
     'signature' => str_replace('\\n', "\n", (string) env('NFMAILER_SIGNATURE', '')),
+
+    // Vorgabe des Schalters „Signatur“ im Modal (Option 'signature' von nfmailer-open
+    // überschreibt sie); der Schalter erscheint nur, wenn eine Signatur gesetzt ist.
+    'signature_default' => (bool) env('NFMAILER_SIGNATURE_DEFAULT', true),
 
     // Optionaler Gate-Name, z. B. 'send-mails' – sonst nur Login erforderlich
     'gate' => null,
@@ -163,7 +167,7 @@ return [
     // allowed_prefixes: Liste für alle Disks oder [disk => Liste]; Disk ohne Eintrag = ganze Disk.
     // Einträge mit * sind Muster: Dokumente liegen unter {FILE_DIR_PREFIX}{Jahr}/akv/files|mails/…
     'attachments' => [
-        'allowed_disks'    => ['local', 'data'],
+        'allowed_disks' => ['local', 'data'],
         'allowed_prefixes' => [
             'local' => ['akten/', 'rechnungen/', '*akv/files/*', '*akv/mails/*'],
             // 'data': Dokumentablage der Kanzlei (Anhänge der Dokumente, z. B. 2026/akv/files/…)
@@ -182,24 +186,24 @@ return [
 
     // Im Modal hochgeladene Dateien
     'uploads' => [
-        'disk'      => 'local',
+        'disk' => 'local',
         'directory' => 'nfmailer/uploads',
-        'max_kb'    => 20480,
+        'max_kb' => 20480,
     ],
 
     // Download-Links statt Anhang
     'links' => [
-        'default'            => false,  // Checkbox vorbelegt?
-        'expires_days'       => 14,
-        'pin_default'        => true,   // „Mit PIN schützen“ vorbelegt?
-        'pin_attempts'       => 5,      // danach wird der Link gesperrt
-        'max_downloads'      => null,   // z. B. 3; null = unbegrenzt bis Ablauf
+        'default' => false,  // Checkbox vorbelegt?
+        'expires_days' => 14,
+        'pin_default' => true,   // „Mit PIN schützen“ vorbelegt?
+        'pin_attempts' => 5,      // danach wird der Link gesperrt
+        'max_downloads' => null,   // z. B. 3; null = unbegrenzt bis Ablauf
         'notify_on_download' => true,   // Absender beim ersten Abruf benachrichtigen
     ],
 
     // php artisan nfmailer:prune (z. B. täglich im Scheduler)
     'prune' => [
-        'links_after_days'   => 90,     // abgelaufene/gesperrte Links so lange nach Ablauf aufheben
+        'links_after_days' => 90,     // abgelaufene/gesperrte Links so lange nach Ablauf aufheben
         'uploads_after_days' => null,   // hochgeladene Dateien löschen; null = behalten (Nachweis)
     ],
 

@@ -35,7 +35,7 @@ class ModelRecipientSource implements RecipientSource
         }
 
         $columns = (array) ($this->config['search'] ?? ['email']);
-        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $term) . '%';
+        $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $term).'%';
 
         /** @var Builder $query */
         $query = $class::query()->where(function (Builder $q) use ($columns, $like) {

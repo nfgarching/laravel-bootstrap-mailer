@@ -23,9 +23,9 @@ class DownloadController
 
         return response()
             ->view('nfmailer::download', [
-                'link'   => $link,
+                'link' => $link,
                 'reason' => $link ? $link->unavailableReason() : 'Der Link ist ungültig.',
-                'token'  => $token,
+                'token' => $token,
             ], $link ? 200 : 404)
             ->withHeaders($this->noIndex());
     }
@@ -84,12 +84,12 @@ class DownloadController
 
             $to = collect($mail->to)->pluck('email')->implode(', ');
             $text = "Die Datei „{$link->name}“ wurde soeben erstmals heruntergeladen.\n\n"
-                . "E-Mail: {$mail->subject}\n"
-                . "Empfänger: {$to}\n"
-                . 'Versandt: ' . ($mail->sent_at?->format('d.m.Y H:i') ?? '–') . "\n"
-                . 'Abruf: ' . now()->format('d.m.Y H:i') . "\n";
+                ."E-Mail: {$mail->subject}\n"
+                ."Empfänger: {$to}\n"
+                .'Versandt: '.($mail->sent_at?->format('d.m.Y H:i') ?? '–')."\n"
+                .'Abruf: '.now()->format('d.m.Y H:i')."\n";
 
-            Mail::raw($text, fn ($m) => $m->to($user->email)->subject('Download: ' . $link->name));
+            Mail::raw($text, fn ($m) => $m->to($user->email)->subject('Download: '.$link->name));
 
             $link->forceFill(['notified_at' => now()])->save();
         } catch (Throwable $e) {

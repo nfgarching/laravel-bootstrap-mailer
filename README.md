@@ -61,7 +61,9 @@ NFMAILER_QUEUE=false
 NFMAILER_SIGNATURE="Kanzlei Muster\nMusterstraße 1\n12345 Musterstadt"
 ```
 
-`\n` in der Signatur wird als Zeilenumbruch übernommen.
+`\n` in der Signatur wird als Zeilenumbruch übernommen. Im Modal lässt sich die Signatur je
+Mail per Schalter „Signatur“ abwählen; `NFMAILER_SIGNATURE_DEFAULT=false` stellt ihn
+standardmäßig aus, die Option `signature` von `nfmailer-open` überschreibt die Vorgabe.
 
 Für Google ist ein **App-Passwort** nötig (2-Faktor muss aktiv sein).
 Alternativ SMTP-Relay `smtp-relay.gmail.com` mit IP-Freigabe in der Admin-Konsole.

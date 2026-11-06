@@ -28,6 +28,56 @@
         --bs-offcanvas-width: var(--nfm-side-width);
     }
 
+    /* ---------------------------------------------- Höhe an das Fenster anpassen
+       Dialog bzw. Seite nimmt die volle Fensterhöhe ein, das Nachrichtenfeld füllt den
+       verbleibenden Platz. Reicht er nicht (viele Empfänger/Anhänge), scrollt der modal-body. */
+    .nfm .modal-dialog.nfm-dialog .modal-content {
+        height: 100%;
+    }
+
+    .nfm-page .nfm-dialog {
+        height: calc(100dvh - 2rem);
+        overflow: hidden;
+    }
+
+    .nfm-page .modal-body {
+        overflow-y: auto;
+    }
+
+    .nfm .modal-body {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .nfm .nfm-compose,
+    .nfm .nfm-body {
+        flex: 1 0 auto;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Schalter (Ablegen, Signatur) mit Rahmen in Höhe eines btn-sm */
+    .nfm .nfm-switch {
+        display: flex;
+        align-items: center;
+        min-height: calc(1.5em + .5rem + 2px);
+        margin-bottom: 0;
+        padding: .125rem .5rem .125rem 2.75em;
+        border: var(--bs-border-width) solid var(--bs-border-color);
+        border-radius: var(--bs-border-radius-sm);
+        font-size: .875rem;
+    }
+
+    .nfm .nfm-switch .form-check-input {
+        margin-top: 0;
+    }
+
+    .nfm .nfm-body-text {
+        flex: 1 1 0;
+        min-height: 12rem;
+        resize: none;
+    }
+
     /* ---------------------------------------------- Empfängerfelder */
     .nfm .nfm-field {
         min-height: 2.5rem;

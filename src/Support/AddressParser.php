@@ -24,8 +24,8 @@ class AddressParser
 
         foreach ($m as $hit) {
             $email = ($hit[4] ?? '') !== '' ? $hit[4] : ($hit[3] ?? '');
-            $name  = ($hit[1] ?? '') !== '' ? $hit[1] : ($hit[2] ?? '');
-            $name  = trim($name, " \t,;");
+            $name = ($hit[1] ?? '') !== '' ? $hit[1] : ($hit[2] ?? '');
+            $name = trim($name, " \t,;");
 
             $valid[] = Recipient::make($email, $name !== '' ? $name : null);
         }
@@ -51,7 +51,7 @@ class AddressParser
         if (function_exists('idn_to_ascii') && str_contains($email, '@')) {
             [$local, $domain] = explode('@', $email, 2);
             $ascii = idn_to_ascii($domain, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
-            $email = $local . '@' . ($ascii ?: $domain);
+            $email = $local.'@'.($ascii ?: $domain);
         }
 
         return (bool) filter_var($email, FILTER_VALIDATE_EMAIL, FILTER_FLAG_EMAIL_UNICODE);

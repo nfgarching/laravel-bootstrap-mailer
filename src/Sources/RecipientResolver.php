@@ -31,7 +31,7 @@ class RecipientResolver
     /**
      * Vorschläge ohne Suche, gruppiert nach Quelle.
      *
-     * @return array<string, list<array>>  [Label => [Recipient-Array, …]]
+     * @return array<string, list<array>> [Label => [Recipient-Array, …]]
      */
     public function suggestions(array $context): array
     {

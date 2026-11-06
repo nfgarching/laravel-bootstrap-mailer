@@ -110,6 +110,9 @@ class MailComposer extends Component
     /** Gesendete Mail ablegen (nfmailer.archive; die Anwendung wertet MailSent aus) */
     public bool $archive = false;
 
+    /** Signatur (nfmailer.signature) anhängen; Vorgabe nfmailer.signature_default */
+    public bool $useSignature = true;
+
     /** Ergebnis der letzten Zertifikatssuche in den CA-Verzeichnissen, je Adresse eine Zeile */
     public array $lookupResults = [];
 
@@ -134,7 +137,7 @@ class MailComposer extends Component
             return;
         }
 
-        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'archive', 'attachments', 'attachments_label']))
+        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'archive', 'signature', 'attachments', 'attachments_label']))
             ->map(fn ($v) => is_string($v) && json_validate($v) && is_array($decoded = json_decode($v, true)) ? $decoded : $v)
             ->all();
 
@@ -159,6 +162,7 @@ class MailComposer extends Component
         $this->usePin = (bool) ($options['pin'] ?? config('nfmailer.links.pin_default', true));
         $this->encrypt = (bool) ($options['encrypt'] ?? true);
         $this->archive = (bool) ($options['archive'] ?? config('nfmailer.archive.default', true));
+        $this->useSignature = (bool) ($options['signature'] ?? config('nfmailer.signature_default', true));
 
         foreach (array_keys(self::FIELDS) as $field) {
             foreach ((array) ($options[$field] ?? []) as $value) {
@@ -795,7 +799,7 @@ class MailComposer extends Component
             text: $this->body,
             files: $links ? [] : $files,
             links: $links,
-            signature: config('nfmailer.signature') ?: null,
+            signature: $this->signature(),
             encrypt: $encrypt,
             pinNote: $pin ? 'Zum Abruf benötigen Sie eine PIN, die Sie getrennt von dieser E-Mail erhalten.' : null,
         ))
@@ -856,7 +860,7 @@ class MailComposer extends Component
         $text = "Guten Tag,\n\nfür die Dokumente, die ich Ihnen soeben in einer separaten E-Mail zum Download "
             ."bereitgestellt habe, lautet die PIN:\n\n    {$pin}\n\n"
             .'Die PIN ist für alle Dokumente dieser E-Mail gültig.'
-            .(($sig = config('nfmailer.signature')) ? "\n\n--\n{$sig}" : '');
+            .(($sig = $this->signature()) ? "\n\n--\n{$sig}" : '');
 
         try {
             // Symfony\Address verlangt einen String als Namen (null führt zu TypeError)
@@ -913,6 +917,12 @@ class MailComposer extends Component
         $this->resetExcept('page');
     }
 
+    /** Anzuhängende Signatur – null, wenn keine konfiguriert oder der Schalter aus ist */
+    protected function signature(): ?string
+    {
+        return $this->useSignature ? (config('nfmailer.signature') ?: null) : null;
+    }
+
     /** mailto:-URL nach RFC 6068 (Zeilenumbrüche als CRLF) */
     protected function mailtoUrl(): string
     {
@@ -922,7 +932,7 @@ class MailComposer extends Component
         ));
 
         $body = $this->body;
-        if ($signature = config('nfmailer.signature')) {
+        if ($signature = $this->signature()) {
             $body .= "\n\n--\n".$signature;
         }
 

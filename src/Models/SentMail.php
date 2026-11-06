@@ -28,6 +28,7 @@ class SentMail extends Model
         'as_links'    => 'boolean',
         'signed'      => 'boolean',
         'encrypted'   => 'boolean',
+        'archive'     => 'boolean',
         'sent_at'     => 'datetime',
     ];
 

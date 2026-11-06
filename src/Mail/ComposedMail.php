@@ -11,7 +11,9 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Mail\Mailables\Headers;
 use Illuminate\Queue\SerializesModels;
+use Nfgarching\Mailer\Models\SentMail;
 use Nfgarching\Mailer\Security\SecureTransport;
+use Throwable;
 
 /**
  * ShouldBeEncrypted: Beim Versand über die Queue liegt der Mailinhalt
@@ -22,8 +24,8 @@ class ComposedMail extends Mailable implements ShouldBeEncrypted
     use Queueable, SerializesModels;
 
     /**
-     * @param list<array{disk: string, path: string, name: string}> $files
-     * @param list<array{name: string, url: string, expires: ?string}> $links
+     * @param  list<array{disk: string, path: string, name: string}>  $files
+     * @param  list<array{name: string, url: string, expires: ?string}>  $links
      */
     public function __construct(
         public string $mailSubject,
@@ -34,6 +36,29 @@ class ComposedMail extends Mailable implements ShouldBeEncrypted
         public bool $encrypt = false,
         public ?string $pinNote = null,
     ) {}
+
+    /**
+     * ID des Protokolleintrags (SentMail). Landet als öffentliche Eigenschaft in den
+     * Daten des MessageSent-Ereignisses; RecordSentMail setzt damit nach dem
+     * Versand durch den Queue-Worker Status und Message-ID.
+     */
+    public ?int $sentMailId = null;
+
+    public function forLog(SentMail $log): static
+    {
+        $this->sentMailId = $log->id;
+
+        return $this;
+    }
+
+    /** Vom Queue-Worker aufgerufen, wenn der Versand endgültig gescheitert ist */
+    public function failed(Throwable $e): void
+    {
+        if ($this->sentMailId) {
+            SentMail::whereKey($this->sentMailId)
+                ->update(['status' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 2000)]);
+        }
+    }
 
     public function envelope(): Envelope
     {

@@ -2,6 +2,8 @@
 
 namespace Nfgarching\Mailer;
 
+use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
@@ -12,6 +14,7 @@ use Nfgarching\Mailer\Console\CertCommand;
 use Nfgarching\Mailer\Console\CheckCommand;
 use Nfgarching\Mailer\Console\PruneCommand;
 use Nfgarching\Mailer\Livewire\FavoritesManager;
+use Nfgarching\Mailer\Listeners\RecordSentMail;
 use Nfgarching\Mailer\Livewire\MailComposer;
 use Nfgarching\Mailer\Security\CertificateDirectory;
 use Nfgarching\Mailer\Security\CertificateStore;
@@ -42,6 +45,9 @@ class MailerServiceProvider extends ServiceProvider
 
         Livewire::component('nf-mail-composer', MailComposer::class);
         Livewire::component('nf-mail-favorites', FavoritesManager::class);
+
+        // Status im Protokoll nachziehen, MailSent auslösen (Package-Listener werden nicht auto-discovered)
+        Event::listen(MessageSent::class, RecordSentMail::class);
 
         Mail::extend('nfmailer', function (array $config) {
             $inner = $config['inner'] ?? config('nfmailer.mailer') ?: config('mail.default');

@@ -28,6 +28,23 @@
         --bs-offcanvas-width: var(--nfm-side-width);
     }
 
+    /* Im iframe-Modal (layout::parts.modal-frame, html.in-frame): das Modal bringt Rahmen-
+       abstand und Schließen-✕ selbst mit. Seite ohne eigenen Abstand, Dialog volle Höhe.
+       Das iframe ist bei xl schmaler als 1200px: der Dialog weicht einer offenen Offcanvas
+       daher immer aus, statt von ihr verdeckt zu werden. */
+    html.in-frame .nfm-page {
+        padding: 0 !important;
+    }
+
+    html.in-frame .nfm-page .nfm-dialog {
+        height: 100dvh;
+        max-width: none;
+    }
+
+    html.in-frame .nfm-page.nfm-side-open .nfm-dialog {
+        margin-right: calc(var(--nfm-side-width) + 1rem) !important;
+    }
+
     /* ---------------------------------------------- Höhe an das Fenster anpassen
        Dialog bzw. Seite nimmt die volle Fensterhöhe ein, das Nachrichtenfeld füllt den
        verbleibenden Platz. Reicht er nicht (viele Empfänger/Anhänge), scrollt der modal-body. */

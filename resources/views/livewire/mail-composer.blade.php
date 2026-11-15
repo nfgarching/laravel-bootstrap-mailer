@@ -21,10 +21,12 @@
 --}}
 <div>
     @if ($page)
-        {{-- Eigenständige Seite: nach Versand bzw. Übergabe ans Mailprogramm schließt sich das Fenster --}}
-        <div class="nfm nfm-page py-3 px-2" id="nfmailerPage" x-data="{ view: 'compose', side: false }"
+        {{-- Eigenständige Seite: nach Versand bzw. Übergabe ans Mailprogramm schließt sich das Fenster
+             bzw. das iframe-Modal (closePopup() im Layout layout::popup) --}}
+        {{-- data-frame-fill: Höhe über 100dvh – im iframe-Modal (layout::parts.modal-frame) volle Höhe --}}
+        <div class="nfm nfm-page py-3 px-2" id="nfmailerPage" data-frame-fill x-data="{ view: 'compose', side: false }"
             :class="{ 'nfm-side-open': side }" x-init="$el.querySelector('.nfm-free')?.focus()"
-            x-on:nfmailer-hide.window="setTimeout(() => window.close(), 500)"
+            x-on:nfmailer-hide.window="setTimeout(() => closePopup(), 500)"
             x-on:show-bs-offcanvas.dot="side = true"
             x-on:hidden-bs-offcanvas.dot="side = !!$root.querySelector('.offcanvas.show')">
             <div class="modal-content border rounded nfm-dialog mx-auto">

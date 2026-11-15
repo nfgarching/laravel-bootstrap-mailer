@@ -9,7 +9,8 @@
     <h5 class="modal-title" id="nfmailerTitle"
         x-text="view === 'options' ? 'Versandoptionen' : 'E-Mail verfassen'">E-Mail verfassen</h5>
     @if ($page)
-        <button type="button" class="btn-close" aria-label="Schließen" onclick="window.close()"></button>
+        {{-- Im iframe-Modal schließt das ✕ des Modals (frame-hide) --}}
+        <button type="button" class="btn-close frame-hide" aria-label="Schließen" onclick="closePopup()"></button>
     @else
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
     @endif

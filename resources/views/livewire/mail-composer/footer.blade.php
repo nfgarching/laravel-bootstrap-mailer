@@ -41,11 +41,11 @@
     </button>
 
     <button type="button" class="btn btn-outline-secondary"
-        @if ($page) onclick="window.close()" @else data-bs-dismiss="modal" @endif>
+        @if ($page) onclick="closePopup()" @else data-bs-dismiss="modal" @endif>
         Abbrechen
     </button>
     <button type="button" class="btn btn-outline-primary" wire:click="mailto"
-        x-on:nfmailer-mailto.window="window.location.href = $event.detail.url"
+        x-on:nfmailer-mailto.window="window.top.location.href = $event.detail.url"
         title="Im Standard-Mailprogramm öffnen (ohne Anhänge, ohne Protokoll)" wire:loading.attr="disabled"
         wire:target="mailto,send,newUploads">
         <i class="bi bi-box-arrow-up-right"></i><span class="d-none d-sm-inline ms-1">MailTo</span>

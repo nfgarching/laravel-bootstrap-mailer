@@ -1,9 +1,10 @@
-{{-- Navbar-Button: E-Mail verfassen (nf-mail-composer, eingebunden über parts.modals) --}}
+{{-- Navbar-Button: E-Mail verfassen (Seite nfmailer.compose).
+     Klick => iframe-Modal (xl), SHIFT => Popup, CTRL => Tab. --}}
 @auth
     <li class="nav-item d-none d-lg-inline">
-        <button type="button" class="nav-link" data-bs-toggle="tooltip" data-bs-title="E-Mail verfassen"
-            onclick="Livewire.dispatch('nfmailer-open', { options: {} })">
+        <x-nav.popup frame frameSize="xl" :href="route('nfmailer.compose')" popup="width=1200,height=900"
+            tooltip="E-Mail verfassen">
             <i class="bi bi-envelope-plus"></i>
-        </button>
+        </x-nav.popup>
     </li>
 @endauth

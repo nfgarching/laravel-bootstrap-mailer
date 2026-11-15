@@ -8,12 +8,49 @@
 </div>
 
 <div class="mb-2 nfm-body" x-data="{ sig: false }">
+    {{-- Formatierung: setzt Markdown-Zeichen um die Auswahl (nfmailerFormat in assets) --}}
+    <div class="d-flex align-items-center gap-2 mb-1">
+        <div class="btn-group btn-group-sm" role="group" aria-label="Formatierung">
+            @foreach ([
+                ['bold', 'bi-type-bold', 'Fett (Strg+B)'],
+                ['italic', 'bi-type-italic', 'Kursiv (Strg+I)'],
+                ['heading', 'bi-type-h3', 'Überschrift'],
+                ['ul', 'bi-list-ul', 'Aufzählung'],
+                ['ol', 'bi-list-ol', 'Nummerierte Liste'],
+                ['quote', 'bi-quote', 'Zitat'],
+                ['link', 'bi-link-45deg', 'Link (Strg+K)'],
+            ] as [$kind, $icon, $title])
+                <button type="button" class="btn btn-outline-secondary" title="{{ $title }}" aria-label="{{ $title }}"
+                    @disabled($preview) x-on:click="nfmailerFormat('{{ $kind }}')">
+                    <i class="bi {{ $icon }}"></i>
+                </button>
+            @endforeach
+        </div>
+        <span class="form-text m-0 d-none d-md-inline">Markdown: **fett**, _kursiv_, - Liste</span>
+        <button type="button" class="btn btn-sm ms-auto {{ $preview ? 'btn-secondary' : 'btn-outline-secondary' }}"
+            wire:click="$toggle('preview')" title="{{ $preview ? 'Zurück zum Bearbeiten' : 'Nachricht so anzeigen, wie sie versendet wird' }}">
+            <i class="bi {{ $preview ? 'bi-pencil' : 'bi-eye' }} me-1"></i>{{ $preview ? 'Bearbeiten' : 'Vorschau' }}
+        </button>
+    </div>
+
     {{-- Höhe folgt dem Fenster (Flex-Kette in assets: modal-content → modal-body → nfm-compose → nfm-body) --}}
-    <textarea id="nfmailer-body" class="form-control nfm-body-text @error('body') is-invalid @enderror" rows="8"
-        placeholder="Nachricht …" wire:model="body"
+    <textarea id="nfmailer-body"
+        class="form-control nfm-body-text @error('body') is-invalid @enderror @if ($preview) d-none @endif"
+        rows="8" placeholder="Nachricht …" wire:model="body"
+        x-on:keydown.ctrl.b.prevent="nfmailerFormat('bold')" x-on:keydown.ctrl.i.prevent="nfmailerFormat('italic')"
+        x-on:keydown.ctrl.k.prevent="nfmailerFormat('link')"
         x-on:nfmailer-insert-transcript.window="nfmailerInsert(($event.detail.text ?? '').trim() + ' ')"></textarea>
+    @if ($preview)
+        <div class="form-control nfm-body-text nfm-body-preview">
+            @if (filled(trim($body)))
+                {!! $this->previewHtml !!}
+            @else
+                <span class="text-body-secondary">Kein Text vorhanden.</span>
+            @endif
+        </div>
+    @endif
     @error('body')
-        <div class="invalid-feedback">{{ $message }}</div>
+        <div class="invalid-feedback d-block">{{ $message }}</div>
     @enderror
 
     @if (config('nfmailer.signature') && $useSignature)

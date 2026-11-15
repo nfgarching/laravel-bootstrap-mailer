@@ -7,7 +7,7 @@
 </head>
 <body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1f2328;background:#ffffff;">
   <div style="max-width:680px;">
-    {!! nl2br(e($text)) !!}
+    {!! \Nfgarching\Mailer\Support\MailMarkdown::html($text) !!}
 
     @if (count($links))
       <div style="margin:24px 0;padding:12px 16px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;">

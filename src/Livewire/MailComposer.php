@@ -22,6 +22,7 @@ use Nfgarching\Mailer\Sources\AttachmentResolver;
 use Nfgarching\Mailer\Sources\RecipientResolver;
 use Nfgarching\Mailer\Support\AddressParser;
 use Nfgarching\Mailer\Support\AttachmentGuard;
+use Nfgarching\Mailer\Support\MailMarkdown;
 use Nfgarching\Textbot\Enhancers\EnhancerFactory;
 use Nfgarching\Textbot\Exceptions\TextEnhancementException;
 use Nfgarching\Textbot\Services\AudioTranscriptionService;
@@ -64,7 +65,11 @@ class MailComposer extends Component
 
     public string $subject = '';
 
+    /** Nachricht in Markdown (HTML-Teil: MailMarkdown, Text-Teil: unverändert) */
     public string $body = '';
+
+    /** Nachricht formatiert anzeigen statt bearbeiten */
+    public bool $preview = false;
 
     #[Locked]
     public array $context = [];
@@ -526,6 +531,13 @@ class MailComposer extends Component
     // ---------------------------------------------------------------- KI & Diktat (textbot)
 
     /** KI-Bearbeitung und Diktat nur, wenn das textbot-Package installiert ist */
+    /** Vorschau der Nachricht, wie sie im HTML-Teil der Mail erscheint */
+    #[Computed]
+    public function previewHtml(): string
+    {
+        return MailMarkdown::html($this->body);
+    }
+
     #[Computed]
     public function textbotAvailable(): bool
     {

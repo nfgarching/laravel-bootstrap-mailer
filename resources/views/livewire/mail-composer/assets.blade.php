@@ -95,6 +95,17 @@
         resize: none;
     }
 
+    /* Vorschau: HTML aus MailMarkdown (Styles inline), hier nur Rahmen und Scrollen */
+    .nfm .nfm-body-preview {
+        height: auto;
+        overflow-y: auto;
+        background: var(--bs-body-bg);
+    }
+
+    .nfm .nfm-body-preview > div > :last-child {
+        margin-bottom: 0 !important;
+    }
+
     /* ---------------------------------------------- Empfängerfelder */
     .nfm .nfm-field {
         min-height: 2.5rem;
@@ -217,5 +228,55 @@
         input.setRangeText(newText, input.selectionStart, input.selectionEnd, 'end');
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.focus();
+    }
+
+    // Markdown-Formatierung der Nachricht: Inline-Auszeichnung um die Auswahl,
+    // Zeilenpräfixe (Liste, Zitat, Überschrift) für alle berührten Zeilen.
+    // Erneutes Anwenden nimmt die Auszeichnung wieder weg.
+    function nfmailerFormat(kind) {
+        const el = document.getElementById('nfmailer-body');
+        if (!el || el.classList.contains('d-none')) return;
+
+        const v = el.value, s = el.selectionStart, e = el.selectionEnd, sel = v.slice(s, e);
+        const marks = { bold: '**', italic: '_' };
+
+        if (marks[kind]) {
+            const m = marks[kind];
+            if (sel && v.slice(s - m.length, s) === m && v.slice(e, e + m.length) === m) {
+                el.setRangeText(sel, s - m.length, e + m.length, 'select');
+            } else {
+                const text = sel || (kind === 'bold' ? 'fett' : 'kursiv');
+                el.setRangeText(m + text + m, s, e);
+                el.setSelectionRange(s + m.length, s + m.length + text.length);
+            }
+        } else if (kind === 'link') {
+            if (/^https?:\/\/\S+$/.test(sel)) {
+                el.setRangeText('[Linktext](' + sel + ')', s, e);
+                el.setSelectionRange(s + 1, s + 9);
+            } else {
+                const text = sel || 'Linktext';
+                el.setRangeText('[' + text + '](https://)', s, e);
+                el.setSelectionRange(s + text.length + 3, s + text.length + 11);
+            }
+        } else {
+            const patterns = { ul: /^(- |\d+\. )/, ol: /^(- |\d+\. )/, quote: /^> ?/, heading: /^#{1,6} / };
+            const own = { ul: /^- /, ol: /^\d+\. /, quote: /^> ?/, heading: /^#{1,6} / };
+            const prefix = { ul: () => '- ', ol: (i) => (i + 1) + '. ', quote: () => '> ', heading: () => '### ' };
+            if (!patterns[kind]) return;
+
+            const start = v.lastIndexOf('\n', s - 1) + 1;
+            let end = v.indexOf('\n', e > s && v[e - 1] === '\n' ? e - 1 : e);
+            if (end < 0) end = v.length;
+
+            const lines = v.slice(start, end).split('\n');
+            const remove = lines.every((l) => own[kind].test(l));
+            const result = lines
+                .map((l, i) => remove ? l.replace(own[kind], '') : prefix[kind](i) + l.replace(patterns[kind], ''))
+                .join('\n');
+            el.setRangeText(result, start, end, 'select');
+        }
+
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.focus();
     }
 </script>

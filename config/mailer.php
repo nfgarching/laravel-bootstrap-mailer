@@ -199,6 +199,9 @@ return [
         'pin_attempts' => 5,      // danach wird der Link gesperrt
         'max_downloads' => null,   // z. B. 3; null = unbegrenzt bis Ablauf
         'notify_on_download' => true,   // Absender beim ersten Abruf benachrichtigen
+        // Mit nfgarching/share (eingerichtet): Links über das Download-Portal statt eigener
+        // Links – je Empfänger ein persönlicher Link und eine eigene E-Mail
+        'portal' => env('NFMAILER_LINKS_PORTAL', true),
     ],
 
     // php artisan nfmailer:prune (z. B. täglich im Scheduler)

@@ -12,12 +12,18 @@
         <div class="form-check form-switch mb-0">
             <input class="form-check-input" type="checkbox" role="switch" id="nfmAsLinks" wire:model.live="asLinks">
             <label class="form-check-label" for="nfmAsLinks">
-                Als Download-Link statt Anhang senden
+                {{ $this->portalAvailable ? 'Über das Download-Portal bereitstellen statt anhängen' : 'Als Download-Link statt Anhang senden' }}
                 @if (config('nfmailer.links.expires_days'))
                     <span class="text-body-secondary small">(gültig {{ config('nfmailer.links.expires_days') }} Tage)</span>
                 @endif
             </label>
         </div>
+        @if ($asLinks && $this->portalAvailable)
+            <div class="small text-body-secondary ms-5 mt-1">
+                Jeder Empfänger – auch unter CC und BCC – erhält eine eigene E-Mail mit seinem persönlichen Link.
+                Die Empfänger sehen einander dabei nicht.
+            </div>
+        @endif
         @unless ($hasAttachments)
             <div class="small text-body-secondary ms-5">Wirkt nur, wenn Anhänge vorhanden sind.</div>
         @endunless
@@ -27,13 +33,13 @@
                 <div class="form-check form-switch mb-0">
                     <input class="form-check-input" type="checkbox" role="switch" id="nfmUsePin"
                         wire:model.live="usePin">
-                    <label class="form-check-label" for="nfmUsePin">Download mit PIN schützen</label>
+                    <label class="form-check-label" for="nfmUsePin">{{ $this->portalAvailable ? 'Abruf mit Passwort schützen (je Empfänger)' : 'Download mit PIN schützen' }}</label>
                 </div>
                 @if ($usePin)
                     <div class="form-check mb-0 mt-1">
                         <input class="form-check-input" type="checkbox" id="nfmPinByMail" wire:model.live="pinByMail">
                         <label class="form-check-label" for="nfmPinByMail">
-                            PIN zusätzlich per separater E-Mail senden
+                            {{ $this->portalAvailable ? 'Passwort' : 'PIN' }} zusätzlich per separater E-Mail senden
                             <span class="text-body-secondary small">(sonst telefonisch/SMS mitteilen)</span>
                         </label>
                     </div>

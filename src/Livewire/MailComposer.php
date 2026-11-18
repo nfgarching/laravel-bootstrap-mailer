@@ -773,6 +773,13 @@ class MailComposer extends Component
         unset($this->security);
         $security = $this->security;
         $encrypt = $this->encrypt && $security['encryptPossible'];
+
+        // Download-Links über das Download-Portal (nfgarching/share): eigene Mail je Empfänger
+        if ($this->asLinks && $files && $this->portalAvailable()) {
+            $this->sendViaPortal($files, $security, $encrypt, $inner, $queue);
+
+            return;
+        }
         $pin = ($this->asLinks && $files && $this->usePin) ? MailLink::generatePin() : null;
 
         $log = SentMail::create([
@@ -864,6 +871,176 @@ class MailComposer extends Component
 
         $this->dispatch('nfmailer-hide');
         $this->resetExcept('page');
+    }
+
+    // ---------------------------------------------------------------- Download-Portal
+
+    /**
+     * Download-Links über das Download-Portal statt der eigenen Links, wenn
+     * nfgarching/share installiert und eingerichtet ist (abschaltbar mit
+     * nfmailer.links.portal = false).
+     */
+    #[Computed]
+    public function portalAvailable(): bool
+    {
+        $client = 'Nfgarching\\Share\\Client\\PortalClient';
+
+        if (! config('nfmailer.links.portal', true) || ! class_exists($client)) {
+            return false;
+        }
+
+        try {
+            return app($client)->isConfigured();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Versand über das Portal: Die Dateien werden einmal bereitgestellt, jeder
+     * Empfänger (An, CC und BCC) bekommt einen eigenen Link und eine eigene
+     * E-Mail. So lässt sich der Abruf je Person nachvollziehen und sperren;
+     * dafür sehen die Empfänger einander nicht.
+     */
+    protected function sendViaPortal(array $files, array $security, bool $encrypt, string $inner, bool $queue): void
+    {
+        $recipients = collect([...$this->to, ...$this->cc, ...$this->bcc])
+            ->unique(fn ($r) => strtolower($r['email']))
+            ->values();
+
+        $log = SentMail::create([
+            'user_id' => auth()->id(),
+            'status' => 'pending',
+            'mailer' => $inner,
+            'subject' => $this->subject,
+            'body' => $this->body,
+            'to' => $this->to,
+            'cc' => $this->cc,
+            'bcc' => $this->bcc,
+            'attachments' => $files,
+            'as_links' => true,
+            'signed' => $security['signs'],
+            'encrypted' => $encrypt,
+            'pin' => null,
+            'archive' => config('nfmailer.archive.enabled', false) && $this->archive,
+            'context' => $this->context,
+            'context_key' => SentMail::contextKey($this->context),
+        ]);
+
+        try {
+            $result = app('Nfgarching\\Share\\Services\\ShareService')->share([
+                'context' => $this->context,
+                'subject' => $this->subject,
+                'expires_at' => now()->addDays((int) config('nfmailer.links.expires_days', 14))->endOfDay(),
+                'max_downloads' => (int) (config('nfmailer.links.max_downloads') ?: config('nfshare.defaults.max_downloads', 5)),
+                'recipients' => $recipients->map(fn ($r) => [
+                    'email' => $r['email'],
+                    'name' => $r['name'] ?? null,
+                    'password' => $this->usePin,
+                ])->all(),
+                'files' => array_map(fn ($f) => ['disk' => $f['disk'], 'path' => $f['path'], 'name' => $f['name'], 'size' => $f['size'] ?? 0], $files),
+            ], auth()->id());
+        } catch (Throwable $e) {
+            report($e);
+            $message = method_exists($e, 'userMessage') ? $e->userMessage() : $e->getMessage();
+            $log->update(['status' => 'failed', 'error' => $message]);
+            $this->notice = 'Bereitstellung im Download-Portal fehlgeschlagen: '.$message;
+
+            return;
+        }
+
+        $shipment = $result->shipment;
+        $names = collect($files)->pluck('name');
+        $label = $names->count() === 1 ? $names->first() : $names->count().' Dokumente ('.$names->take(3)->implode(', ').($names->count() > 3 ? ', …' : '').')';
+        $passwords = [];
+        $errors = [];
+
+        foreach ($shipment->recipients as $recipient) {
+            $link = $result->links[$recipient->id] ?? null;
+
+            if ($link === null) {
+                $errors[] = $recipient->email.': kein Link';
+
+                continue;
+            }
+
+            $address = ['email' => $recipient->email, 'name' => (string) ($recipient->name ?? '')];
+
+            $mail = (new ComposedMail(
+                mailSubject: $this->subject,
+                text: $this->body,
+                files: [],
+                links: [['name' => $label, 'url' => $link['url'], 'expires' => $shipment->expires_at?->timezone(config('app.timezone'))->format('d.m.Y')]],
+                signature: $this->signature(),
+                encrypt: $encrypt,
+                pinNote: $link['password'] ? 'Zum Abruf benötigen Sie ein Passwort, das Sie getrennt von dieser E-Mail erhalten.' : null,
+            ))->to([$address])->forLog($log);
+
+            try {
+                $queue ? Mail::mailer('nfmailer')->queue($mail) : Mail::mailer('nfmailer')->send($mail);
+            } catch (Throwable $e) {
+                report($e);
+                $errors[] = $recipient->email.': '.$e->getMessage();
+
+                continue;
+            }
+
+            if ($link['password']) {
+                $passwords[] = [
+                    'email' => $recipient->email,
+                    'name' => $recipient->name,
+                    'password' => $link['password'],
+                    'mailed' => $this->pinByMail && $this->sendPasswordMail($address, $link['password']),
+                ];
+            }
+        }
+
+        $log->update($errors
+            ? ['status' => 'failed', 'error' => implode('; ', $errors)]
+            : ['status' => $queue ? 'queued' : 'sent', 'sent_at' => $queue ? null : now()]);
+
+        $this->dispatch('nfmailer-sent', id: $log->id);
+
+        if ($errors) {
+            $this->notice = 'Nicht an alle versandt: '.implode('; ', $errors);
+        }
+
+        if ($passwords || $errors) {
+            $this->result = [
+                'id' => $log->id,
+                'pin' => null,
+                'portal' => true,
+                'passwords' => $passwords,
+                'pinMailed' => false,
+                'signed' => $security['signs'],
+                'encrypted' => $encrypt,
+            ];
+
+            return;
+        }
+
+        $this->dispatch('nfmailer-hide');
+        $this->resetExcept('page');
+    }
+
+    /** Passwort für den Portal-Link in einer eigenen E-Mail an einen Empfänger */
+    protected function sendPasswordMail(array $address, string $password): bool
+    {
+        $text = "Guten Tag,\n\nfür die Dokumente, die ich Ihnen soeben in einer separaten E-Mail über unser "
+            ."Dokumentenportal bereitgestellt habe, lautet das Passwort:\n\n    {$password}\n\n"
+            .'Groß- und Kleinschreibung sowie Bindestriche spielen bei der Eingabe keine Rolle.'
+            .(($sig = $this->signature()) ? "\n\n--\n{$sig}" : '');
+
+        try {
+            Mail::mailer('nfmailer')->raw($text, fn ($m) => $m->to($address['email'], $address['name'])
+                ->subject('Passwort für Ihren Dokumentenabruf'));
+
+            return true;
+        } catch (Throwable $e) {
+            report($e);
+
+            return false;
+        }
     }
 
     /** Zweite E-Mail nur mit der PIN (getrennter Versand, ohne Bezug zum Inhalt im Betreff) */

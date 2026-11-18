@@ -26,7 +26,7 @@
             @endif
             @if ($asLinks && $hasAttachments)
                 <span class="badge text-bg-light border"><i class="bi bi-link-45deg"></i>
-                    Download-Link{{ $usePin ? ' + PIN' : '' }}</span>
+                    {{ $this->portalAvailable ? 'Portal-Link' : 'Download-Link' }}{{ $usePin ? ($this->portalAvailable ? ' + Passwort' : ' + PIN') : '' }}</span>
             @endif
         </button>
     </div>

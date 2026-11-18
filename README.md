@@ -360,6 +360,15 @@ vertraulichen Angaben (Namen, Diagnosen, Aktenthemen) in den Betreff.
 - optional `links.max_downloads`; Sperren per `$link->revoke()`
 - Benachrichtigung an den Absender beim ersten Abruf (`links.notify_on_download`)
 
+**Mit dem Download-Portal** ([nfgarching/share](https://github.com/nfgarching/laravel-bootstrap-share)):
+Ist das Share-Package installiert und eingerichtet (`php artisan share:check`), laufen
+Download-Links über das Portal statt über die eigenen Links. Die Anhänge werden einmal
+bereitgestellt; jeder Empfänger (An, CC und BCC) erhält eine **eigene E-Mail mit
+persönlichem Link** und, falls gewählt, ein eigenes Passwort statt der gemeinsamen PIN.
+Die Empfänger sehen einander dabei nicht. Abruf, Sperre und Widerruf je Person über die
+Übersicht des Share-Packages. Abschalten: `links.portal` = `false` bzw.
+`NFMAILER_LINKS_PORTAL=false`.
+
 ### Aufräumen
 
 ```php

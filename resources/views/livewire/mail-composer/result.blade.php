@@ -10,6 +10,31 @@
             <span class="badge text-bg-light border"><i class="bi bi-lock-fill"></i> verschlüsselt</span>
         @endif
     </p>
+    @if ($result['portal'] ?? false)
+        <p class="small">Jeder Empfänger hat eine eigene E-Mail mit seinem persönlichen Link aus dem Download-Portal erhalten.</p>
+        @if ($notice)
+            <div class="alert alert-warning small text-start">{{ $notice }}</div>
+        @endif
+        @if ($result['passwords'])
+            <div class="border rounded p-3 bg-body-tertiary text-start">
+                <div class="small text-body-secondary mb-2">Passwörter für den Abruf</div>
+                @foreach ($result['passwords'] as $entry)
+                    <div class="d-flex justify-content-between gap-3 py-1 border-top" wire:key="nfm-pw-{{ $loop->index }}">
+                        <span class="small text-break">{{ $entry['name'] ?: $entry['email'] }}</span>
+                        <span class="font-monospace fw-bold user-select-all">{{ $entry['password'] }}</span>
+                    </div>
+                @endforeach
+                <div class="small mt-2">
+                    @if (collect($result['passwords'])->every(fn ($e) => $e['mailed']))
+                        Die Passwörter wurden zusätzlich in separaten E-Mails versandt.
+                    @else
+                        Bitte teilen Sie die Passwörter telefonisch oder per SMS mit.
+                    @endif
+                </div>
+            </div>
+            <p class="small text-body-secondary mt-3 mb-0">Link und Passwort bleiben in der Übersicht des Download-Portals abrufbar.</p>
+        @endif
+    @else
     <div class="border rounded p-3 bg-body-tertiary">
         <div class="small text-body-secondary">PIN für die Download-Links</div>
         <div class="fs-2 fw-bold font-monospace user-select-all" style="letter-spacing: .3rem">
@@ -23,4 +48,5 @@
         </div>
     </div>
     <p class="small text-body-secondary mt-3 mb-0">Die PIN bleibt im Versandprotokoll (verschlüsselt) abrufbar.</p>
+    @endif
 </div>

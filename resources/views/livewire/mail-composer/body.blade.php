@@ -8,45 +8,33 @@
 </div>
 
 <div class="mb-2 nfm-body" x-data="{ sig: false }">
-    {{-- Formatierung: setzt Markdown-Zeichen um die Auswahl (nfmailerFormat in assets) --}}
-    <div class="d-flex align-items-center gap-2 mb-1">
-        <div class="btn-group btn-group-sm" role="group" aria-label="Formatierung">
-            @foreach ([
-                ['bold', 'bi-type-bold', 'Fett (Strg+B)'],
-                ['italic', 'bi-type-italic', 'Kursiv (Strg+I)'],
-                ['heading', 'bi-type-h3', 'Überschrift'],
-                ['ul', 'bi-list-ul', 'Aufzählung'],
-                ['ol', 'bi-list-ol', 'Nummerierte Liste'],
-                ['quote', 'bi-quote', 'Zitat'],
-                ['link', 'bi-link-45deg', 'Link (Strg+K)'],
-            ] as [$kind, $icon, $title])
-                <button type="button" class="btn btn-outline-secondary" title="{{ $title }}" aria-label="{{ $title }}"
-                    @disabled($preview) x-on:click="nfmailerFormat('{{ $kind }}')">
-                    <i class="bi {{ $icon }}"></i>
-                </button>
-            @endforeach
-        </div>
-        <span class="form-text m-0 d-none d-md-inline">Markdown: **fett**, _kursiv_, - Liste</span>
-        <button type="button" class="btn btn-sm ms-auto {{ $preview ? 'btn-secondary' : 'btn-outline-secondary' }}"
-            wire:click="$toggle('preview')" title="{{ $preview ? 'Zurück zum Bearbeiten' : 'Nachricht so anzeigen, wie sie versendet wird' }}">
-            <i class="bi {{ $preview ? 'bi-pencil' : 'bi-eye' }} me-1"></i>{{ $preview ? 'Bearbeiten' : 'Vorschau' }}
-        </button>
-    </div>
+    @php
+        $bodyClass = 'nfm-body-text' . ($errors->has('body') ? ' is-invalid' : '');
+    @endphp
 
-    {{-- Höhe folgt dem Fenster (Flex-Kette in assets: modal-content → modal-body → nfm-compose → nfm-body) --}}
-    <textarea id="nfmailer-body"
-        class="form-control nfm-body-text @error('body') is-invalid @enderror @if ($preview) d-none @endif"
-        rows="8" placeholder="Nachricht …" wire:model="body"
-        x-on:keydown.ctrl.b.prevent="nfmailerFormat('bold')" x-on:keydown.ctrl.i.prevent="nfmailerFormat('italic')"
-        x-on:keydown.ctrl.k.prevent="nfmailerFormat('link')"></textarea>
-    @if ($preview)
-        <div class="form-control nfm-body-text nfm-body-preview">
-            @if (filled(trim($body)))
-                {!! $this->previewHtml !!}
-            @else
-                <span class="text-body-secondary">Kein Text vorhanden.</span>
-            @endif
+    {{-- Textfeld mit Markdown-Toolbar und Vorschau aus dem textbot-Package (x-markdown-textarea);
+         ohne textbot ein schlichtes Textfeld mit eigener Vorschau. Höhe folgt dem Fenster
+         (Flex-Kette in assets: modal-content → modal-body → nfm-compose → nfm-body) --}}
+    @if ($this->textbotAvailable)
+        <x-dynamic-component component="markdown-textarea" id="nfmailer-body" :preview="$preview"
+            :preview-html="$preview ? $this->previewHtml : ''" preview-class="nfm-body-text nfm-body-preview"
+            preview-title="Nachricht so anzeigen, wie sie versendet wird" :class="$bodyClass" rows="8"
+            placeholder="Nachricht …" wire:model="body" />
+    @else
+        <div class="d-flex mb-1">
+            <div class="ms-auto">@include('nfmailer::livewire.mail-composer.preview-toggle')</div>
         </div>
+        <textarea id="nfmailer-body" class="form-control {{ $bodyClass }} @if ($preview) d-none @endif"
+            rows="8" placeholder="Nachricht …" wire:model="body"></textarea>
+        @if ($preview)
+            <div class="form-control nfm-body-text nfm-body-preview">
+                @if (filled(trim($body)))
+                    {!! $this->previewHtml !!}
+                @else
+                    <span class="text-body-secondary">Kein Text vorhanden.</span>
+                @endif
+            </div>
+        @endif
     @endif
     @error('body')
         <div class="invalid-feedback d-block">{{ $message }}</div>
@@ -59,14 +47,10 @@
 
     <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
         @if ($this->textbotAvailable)
-            <button type="button" wire:click="enhance" wire:loading.attr="disabled" wire:target="enhance"
-                class="btn btn-outline-primary btn-sm"
-                title="Nachricht per KI überarbeiten ({{ config('textbot.modes.' . config('textbot.defaults.mode') . '.label', 'Standardmodus') }})">
-                <span wire:loading.remove wire:target="enhance"><i class="bi bi-stars me-1"></i> KI ausführen</span>
-                <span wire:loading wire:target="enhance">
-                    <span class="spinner-border spinner-border-sm me-1" role="status"></span> Wird bearbeitet …
-                </span>
-            </button>
+            {{-- Split-Button des textbot: KI ausführen, Modus/Provider/Modell im Panel --}}
+            <x-dynamic-component component="ai-button" variant="outline-primary" :modes="$this->aiModes"
+                :providers="$this->aiProviders" :mode="$mode" :provider="$provider" :aimodel="$aimodel"
+                :usage="$this->aiUsage" />
         @endif
 
         {{-- Diktat: Live-Diktat immer, KI-Transkription nur mit gebundenem AudioTranscriber (textbot) --}}

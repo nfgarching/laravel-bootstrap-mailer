@@ -27,6 +27,8 @@ use Nfgarching\Mailer\Support\AttachmentGuard;
 use Nfgarching\Mailer\Support\MailMarkdown;
 use Nfgarching\Textbot\Enhancers\EnhancerFactory;
 use Nfgarching\Textbot\Exceptions\TextEnhancementException;
+use Nfgarching\Textbot\Models\TextUsage;
+use Nfgarching\Textbot\Services\AiSettings;
 use Throwable;
 
 /**
@@ -125,6 +127,17 @@ class MailComposer extends Component
 
     public ?string $notice = null;
 
+    /** KI-Einstellungen für <x-ai-button> (textbot); bleiben über resetExcept() hinweg erhalten */
+    public string $mode = '';
+
+    public string $provider = '';
+
+    public string $aimodel = '';
+
+    /** Letzter KI-Lauf dieser Mail (textbot_usages) für die Verbrauchsanzeige */
+    #[Locked]
+    public ?int $aiUsageId = null;
+
     /** true = eigenständige Seite statt Modal */
     #[Locked]
     public bool $page = false;
@@ -137,6 +150,8 @@ class MailComposer extends Component
      */
     public function mount(): void
     {
+        $this->initAiSettings();
+
         if (! request()->routeIs('nfmailer.compose')) {
             return;
         }
@@ -155,7 +170,7 @@ class MailComposer extends Component
     {
         $options = $options ?: $data;
 
-        $this->resetExcept('page');
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
         $this->resetValidation();
         unset($this->suggestions, $this->results);
 
@@ -534,7 +549,7 @@ class MailComposer extends Component
     {
         $this->result = null;
         $this->dispatch('nfmailer-hide');
-        $this->resetExcept('page');
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
     }
 
     // ---------------------------------------------------------------- Anhänge
@@ -566,10 +581,62 @@ class MailComposer extends Component
         return class_exists(EnhancerFactory::class);
     }
 
-    /**
-     * Nachrichtentext per KI bearbeiten – im Standardmodus des Textbots
-     * (config('textbot.defaults.mode')) mit dessen Provider/Modell.
-     */
+    /** Modi des Textbots für <x-ai-button> */
+    #[Computed]
+    public function aiModes(): array
+    {
+        return $this->textbotAvailable ? app(AiSettings::class)->modes() : [];
+    }
+
+    /** Provider und Modelle des Textbots für <x-ai-button> */
+    #[Computed]
+    public function aiProviders(): array
+    {
+        return $this->textbotAvailable ? app(AiSettings::class)->providers() : [];
+    }
+
+    /** Verbrauch des letzten KI-Laufs für <x-ai-button>; nur der Lauf, eine Mail hat keine Versionen */
+    #[Computed]
+    public function aiUsage(): array
+    {
+        if (! $this->aiUsageId || ! $this->textbotAvailable) {
+            return [];
+        }
+
+        $usage = TextUsage::find($this->aiUsageId);
+
+        return $usage ? ['last' => TextUsage::summary([$usage])] : [];
+    }
+
+    /** Startwerte: Standardmodus des Textbots mit dessen Provider/Modell */
+    protected function initAiSettings(): void
+    {
+        if (! $this->textbotAvailable || $this->mode !== '') {
+            return;
+        }
+
+        $this->mode = app(AiSettings::class)->defaultMode();
+        $this->updatedMode($this->mode);
+    }
+
+    /** Ein Moduswechsel zieht Provider und Modell des Modus nach (wie im Textbot) */
+    public function updatedMode(string $value): void
+    {
+        if (! $this->textbotAvailable || ! array_key_exists($value, $this->aiModes)) {
+            return;
+        }
+
+        ['provider' => $this->provider, 'aimodel' => $this->aimodel] = app(AiSettings::class)->defaultsFor($value);
+    }
+
+    public function updatedProvider(string $value): void
+    {
+        if ($this->textbotAvailable) {
+            $this->aimodel = app(AiSettings::class)->defaultModelFor($value);
+        }
+    }
+
+    /** Nachrichtentext per KI bearbeiten – mit Modus, Provider und Modell aus <x-ai-button> */
     public function enhance(): void
     {
         $this->notice = null;
@@ -584,19 +651,13 @@ class MailComposer extends Component
             return;
         }
 
-        $modes = config('textbot.modes', []);
-        $mode = config('textbot.defaults.mode');
-        if (! isset($modes[$mode])) {
-            $mode = array_key_first($modes);
-        }
+        $settings = app(AiSettings::class);
+        $ai = $settings->resolve($this->provider, $this->aimodel, $this->mode);
 
         try {
-            $this->body = app(EnhancerFactory::class)
-                ->make($modes[$mode]['provider'] ?? null)
-                ->enhance($this->body, [
-                    'model' => $modes[$mode]['aimodel'] ?? null,
-                    'system_prompt' => $modes[$mode]['prompt'] ?? null,
-                ]);
+            ['text' => $this->body, 'usage' => $usage] = $settings->run($this->body, $ai, 'mailer');
+            $this->aiUsageId = $usage->id;
+            unset($this->aiUsage);
         } catch (TextEnhancementException $e) {
             $this->notice = $e->getMessage();
         }
@@ -861,7 +922,7 @@ class MailComposer extends Component
         }
 
         $this->dispatch('nfmailer-hide');
-        $this->resetExcept('page');
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
     }
 
     // ---------------------------------------------------------------- Download-Portal
@@ -1011,7 +1072,7 @@ class MailComposer extends Component
         }
 
         $this->dispatch('nfmailer-hide');
-        $this->resetExcept('page');
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
     }
 
     /** Passwort für den Portal-Link in einer eigenen E-Mail an einen Empfänger */
@@ -1094,7 +1155,7 @@ class MailComposer extends Component
         }
 
         $this->dispatch('nfmailer-hide');
-        $this->resetExcept('page');
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
     }
 
     /** Anzuhängende Signatur – null, wenn keine konfiguriert oder der Schalter aus ist */

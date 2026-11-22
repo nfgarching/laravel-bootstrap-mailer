@@ -201,35 +201,9 @@
     [x-cloak] {
         display: none !important;
     }
-
-    /* Diktat-Button (textbot-Partial) während der Aufnahme */
-    .nfm .textbot-mic-pulse i {
-        animation: nfm-mic-pulse 1.2s ease-in-out infinite;
-    }
-
-    @keyframes nfm-mic-pulse {
-
-        0%,
-        100% {
-            opacity: 1;
-        }
-
-        50% {
-            opacity: .35;
-        }
-    }
 </style>
 
 <script>
-    // Text am Cursor in die Nachricht einfügen (Diktat) und Livewire syncen.
-    function nfmailerInsert(newText) {
-        const input = document.getElementById('nfmailer-body');
-        if (!input) return;
-        input.setRangeText(newText, input.selectionStart, input.selectionEnd, 'end');
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.focus();
-    }
-
     // Markdown-Formatierung der Nachricht: Inline-Auszeichnung um die Auswahl,
     // Zeilenpräfixe (Liste, Zitat, Überschrift) für alle berührten Zeilen.
     // Erneutes Anwenden nimmt die Auszeichnung wieder weg.

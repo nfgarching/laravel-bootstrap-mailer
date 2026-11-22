@@ -38,8 +38,7 @@
         class="form-control nfm-body-text @error('body') is-invalid @enderror @if ($preview) d-none @endif"
         rows="8" placeholder="Nachricht …" wire:model="body"
         x-on:keydown.ctrl.b.prevent="nfmailerFormat('bold')" x-on:keydown.ctrl.i.prevent="nfmailerFormat('italic')"
-        x-on:keydown.ctrl.k.prevent="nfmailerFormat('link')"
-        x-on:nfmailer-insert-transcript.window="nfmailerInsert(($event.detail.text ?? '').trim() + ' ')"></textarea>
+        x-on:keydown.ctrl.k.prevent="nfmailerFormat('link')"></textarea>
     @if ($preview)
         <div class="form-control nfm-body-text nfm-body-preview">
             @if (filled(trim($body)))
@@ -68,9 +67,10 @@
                     <span class="spinner-border spinner-border-sm me-1" role="status"></span> Wird bearbeitet …
                 </span>
             </button>
-
-            @include('textbot::livewire.partials.dictation', ['insert' => 'nfmailerInsert'])
         @endif
+
+        {{-- Diktat: Live-Diktat immer, KI-Transkription nur mit gebundenem AudioTranscriber (textbot) --}}
+        <x-dictation target="#nfmailer-body" transcribe />
 
         <div class="d-flex align-items-center gap-2 ms-auto">
 

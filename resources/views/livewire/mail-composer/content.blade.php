@@ -8,6 +8,7 @@
     </button>
     <h5 class="modal-title" id="nfmailerTitle"
         x-text="view === 'options' ? 'Versandoptionen' : 'E-Mail verfassen'">E-Mail verfassen</h5>
+    <small class="text-muted ms-3 text-truncate">{{ $this->contextLabel ?? 'ohne Zuordnung' }}</small>
     @if ($page)
         {{-- Im iframe-Modal schließt das ✕ des Modals (frame-hide) --}}
         <button type="button" class="btn-close frame-hide" aria-label="Schließen" onclick="closePopup()"></button>

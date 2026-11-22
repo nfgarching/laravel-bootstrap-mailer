@@ -144,6 +144,9 @@ return [
         'enabled' => (bool) env('NFMAILER_ARCHIVE', false),
         'default' => (bool) env('NFMAILER_ARCHIVE_DEFAULT', true),
         'label' => env('NFMAILER_ARCHIVE_LABEL', 'Gesendete Mail ablegen'),
+        // Kontext-Schlüssel, dem die abgelegte Mail zugeordnet wird; fehlt er im
+        // Kontext, zeigt der Kopf „neu: …“ (die Anwendung legt den Datensatz an).
+        'into' => env('NFMAILER_ARCHIVE_INTO', 'dokument'),
     ],
 
     'reply_to' => [

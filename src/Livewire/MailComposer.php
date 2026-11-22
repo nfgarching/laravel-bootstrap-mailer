@@ -4,6 +4,7 @@ namespace Nfgarching\Mailer\Livewire;
 
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
@@ -11,6 +12,7 @@ use Livewire\Attributes\On;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
+use Nfgarching\Core\Traits\TranscribesDictation;
 use Nfgarching\Mailer\Data\Recipient;
 use Nfgarching\Mailer\Mail\ComposedMail;
 use Nfgarching\Mailer\Models\MailFavorite;
@@ -25,7 +27,6 @@ use Nfgarching\Mailer\Support\AttachmentGuard;
 use Nfgarching\Mailer\Support\MailMarkdown;
 use Nfgarching\Textbot\Enhancers\EnhancerFactory;
 use Nfgarching\Textbot\Exceptions\TextEnhancementException;
-use Nfgarching\Textbot\Services\AudioTranscriptionService;
 use Throwable;
 
 /**
@@ -40,6 +41,7 @@ use Throwable;
 #[Layout('layout::popup')]
 class MailComposer extends Component
 {
+    use TranscribesDictation;
     use WithFileUploads;
 
     public const FIELDS = ['to' => 'An', 'cc' => 'CC', 'bcc' => 'BCC'];
@@ -89,9 +91,6 @@ class MailComposer extends Component
     public array $uploads = [];
 
     public array $newUploads = [];
-
-    /** Diktat-Aufnahme (temporär, wird nach der Transkription verworfen) */
-    public ?TemporaryUploadedFile $audioUpload = null;
 
     /** Offcanvas „Anhänge“ geöffnet – nur dann werden die Anhang-Quellen abgefragt */
     public bool $showSources = false;
@@ -333,6 +332,29 @@ class MailComposer extends Component
         $hit = $pool->first(fn ($r) => mb_strtolower($r['email']) === $key);
 
         return $hit ? AddressParser::one($hit) : null;
+    }
+
+    // ---------------------------------------------------------------- Zuordnung
+
+    /**
+     * Kopfanzeige der Zuordnung aus dem Kontext, z. B. „Akte #12 · Dokument #34“.
+     * Wird die Mail abgelegt und fehlt der Schlüssel aus nfmailer.archive.into im
+     * Kontext, legt die Anwendung einen neuen Datensatz an: „neu: Dokument“.
+     */
+    #[Computed]
+    public function contextLabel(): ?string
+    {
+        $parts = collect($this->context)
+            ->filter(fn ($value) => is_scalar($value) && $value !== '')
+            ->map(fn ($value, $key) => Str::headline((string) $key).' #'.$value)
+            ->values();
+
+        $into = (string) config('nfmailer.archive.into', '');
+        if ($into !== '' && config('nfmailer.archive.enabled', false) && $this->archive && ! isset($this->context[$into])) {
+            $parts->push('neu: '.Str::headline($into));
+        }
+
+        return $parts->isEmpty() ? null : $parts->implode(' · ');
     }
 
     // ---------------------------------------------------------------- Favoriten
@@ -580,41 +602,10 @@ class MailComposer extends Component
         }
     }
 
-    /** Diktat-Aufnahme (Upload aus dem textbot-Partial) transkribieren und am Cursor einfügen */
-    public function updatedAudioUpload(): void
+    /** Diktat (core TranscribesDictation): Meldungen im Hinweisfeld */
+    protected function dictationFailed(?string $message): void
     {
-        $this->notice = null;
-
-        $upload = $this->audioUpload;
-        $this->audioUpload = null;
-
-        if (! $upload || ! $this->textbotAvailable) {
-            return;
-        }
-
-        $mime = (string) $upload->getMimeType();
-
-        if (! str_starts_with($mime, 'audio/')) {
-            $this->notice = 'Nur Audio-Aufnahmen können transkribiert werden.';
-
-            return;
-        }
-
-        if ($upload->getSize() > 12 * 1024 * 1024) {
-            $this->notice = 'Aufnahme zu groß (max. 12 MB).';
-
-            return;
-        }
-
-        try {
-            $transcript = app(AudioTranscriptionService::class)->transcribe($upload->get(), $mime);
-        } catch (TextEnhancementException $e) {
-            $this->notice = $e->getMessage();
-
-            return;
-        }
-
-        $this->dispatch('nfmailer-insert-transcript', text: $transcript);
+        $this->notice = $message;
     }
 
     /** Offcanvas „Anhänge“ geöffnet: Dateien der Anhang-Quellen laden */

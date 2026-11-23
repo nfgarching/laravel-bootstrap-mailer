@@ -4,6 +4,7 @@ namespace Nfgarching\Mailer;
 
 use Illuminate\Mail\Events\MessageSent;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
@@ -14,11 +15,16 @@ use Nfgarching\Mailer\Console\CertCommand;
 use Nfgarching\Mailer\Console\CheckCommand;
 use Nfgarching\Mailer\Console\PruneCommand;
 use Nfgarching\Mailer\Listeners\RecordSentMail;
+use Nfgarching\Mailer\Livewire\DraftsManager;
 use Nfgarching\Mailer\Livewire\FavoritesManager;
 use Nfgarching\Mailer\Livewire\MailComposer;
+use Nfgarching\Mailer\Models\SentMail;
+use Nfgarching\Mailer\Policies\SentMailPolicy;
 use Nfgarching\Mailer\Security\CertificateDirectory;
 use Nfgarching\Mailer\Security\CertificateStore;
 use Nfgarching\Mailer\Security\SecureTransport;
+use Nfgarching\Mailer\Services\DraftStore;
+use Nfgarching\Mailer\Services\MailDispatcher;
 use Nfgarching\Mailer\Sources\RecipientResolver;
 
 class MailerServiceProvider extends ServiceProvider
@@ -30,6 +36,8 @@ class MailerServiceProvider extends ServiceProvider
         $this->app->scoped(RecipientResolver::class);
         $this->app->singleton(CertificateStore::class, fn () => CertificateStore::fromConfig());
         $this->app->singleton(CertificateDirectory::class, fn () => CertificateDirectory::fromConfig());
+        $this->app->singleton(DraftStore::class);
+        $this->app->singleton(MailDispatcher::class);
 
         // Mailer „nfmailer“: umhüllt den eigentlichen Versandweg (TLS-Pflicht, S/MIME)
         if (! $this->app['config']->has('mail.mailers.nfmailer')) {
@@ -45,6 +53,11 @@ class MailerServiceProvider extends ServiceProvider
 
         Livewire::component('nf-mail-composer', MailComposer::class);
         Livewire::component('nf-mail-favorites', FavoritesManager::class);
+        Livewire::component('nf-mail-drafts', DraftsManager::class);
+
+        // Rechte auf Entwürfe und Protokoll. Die Anwendung kann danach (AppServiceProvider)
+        // mit Gate::policy(SentMail::class, …) eine eigene Policy setzen; die spätere gilt.
+        Gate::policy(SentMail::class, SentMailPolicy::class);
 
         // Status im Protokoll nachziehen, MailSent auslösen (Package-Listener werden nicht auto-discovered)
         Event::listen(MessageSent::class, RecordSentMail::class);

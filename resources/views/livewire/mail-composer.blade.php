@@ -42,6 +42,7 @@
             :class="{ 'nfm-side-open': side }"
             x-on:nfmailer-show.window="view = 'compose'; bootstrap.Modal.getOrCreateInstance($el).show()"
             x-on:nfmailer-hide.window="bootstrap.Modal.getOrCreateInstance($el).hide()"
+            x-on:hidden-bs-modal.dot="$wire.autosave()"
             x-on:shown-bs-modal.dot="$el.querySelector('.nfm-free')?.focus()"
             x-on:hide-bs-modal.dot="$el.querySelectorAll('.offcanvas.show').forEach(o => bootstrap.Offcanvas.getInstance(o)?.hide())"
             x-on:show-bs-offcanvas.dot="side = true"

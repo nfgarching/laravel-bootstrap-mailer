@@ -40,9 +40,35 @@
         <i class="bi bi-arrow-left me-1"></i>Zur Nachricht
     </button>
 
+    @if (config('nfmailer.drafts.enabled', true))
+        <span class="small text-body-secondary text-nowrap" wire:loading.remove wire:target="saveDraft,autosave">
+            @if ($this->dirty)
+                <i class="bi bi-circle-fill text-warning" style="font-size: .5rem" title="Ungespeicherte Änderungen"></i>
+            @elseif ($savedAt)
+                <i class="bi bi-check2"></i> Entwurf {{ $savedAt }}
+            @endif
+        </span>
+        <span class="small text-body-secondary text-nowrap" wire:loading wire:target="saveDraft,autosave">
+            <span class="spinner-border spinner-border-sm"></span> speichert …
+        </span>
+        <div class="btn-group">
+            <button type="button" class="btn btn-outline-secondary" wire:click="saveDraft" wire:loading.attr="disabled"
+                wire:target="saveDraft,send,newUploads" title="Als Entwurf speichern">
+                <i class="bi bi-floppy"></i><span class="d-none d-md-inline ms-1">Entwurf</span>
+            </button>
+            @if ($draftId)
+                <button type="button" class="btn btn-outline-danger" wire:click="discardDraft"
+                    wire:confirm="Entwurf löschen?" title="Entwurf verwerfen">
+                    <i class="bi bi-trash"></i>
+                </button>
+            @endif
+        </div>
+    @endif
+
+    {{-- Schließen speichert ungesicherte Änderungen als Entwurf (Modal: hidden.bs.modal → autosave) --}}
     <button type="button" class="btn btn-outline-secondary"
-        @if ($page) onclick="closePopup()" @else data-bs-dismiss="modal" @endif>
-        Abbrechen
+        @if ($page) x-on:click="$wire.autosave().then(() => closePopup())" @else data-bs-dismiss="modal" @endif>
+        Schließen
     </button>
     <button type="button" class="btn btn-outline-primary" wire:click="mailto"
         x-on:nfmailer-mailto.window="window.top.location.href = $event.detail.url"

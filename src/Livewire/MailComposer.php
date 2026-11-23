@@ -3,7 +3,7 @@
 namespace Nfgarching\Mailer\Livewire;
 
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -13,18 +13,21 @@ use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 use Nfgarching\Core\Traits\TranscribesDictation;
+use Nfgarching\Mailer\Data\MailDraft;
 use Nfgarching\Mailer\Data\Recipient;
-use Nfgarching\Mailer\Mail\ComposedMail;
+use Nfgarching\Mailer\Exceptions\DraftConflict;
 use Nfgarching\Mailer\Models\MailFavorite;
-use Nfgarching\Mailer\Models\MailLink;
 use Nfgarching\Mailer\Models\SentMail;
 use Nfgarching\Mailer\Security\CertificateDirectory;
 use Nfgarching\Mailer\Security\CertificateStore;
+use Nfgarching\Mailer\Services\DraftStore;
+use Nfgarching\Mailer\Services\MailDispatcher;
 use Nfgarching\Mailer\Sources\AttachmentResolver;
 use Nfgarching\Mailer\Sources\RecipientResolver;
 use Nfgarching\Mailer\Support\AddressParser;
 use Nfgarching\Mailer\Support\AttachmentGuard;
 use Nfgarching\Mailer\Support\MailMarkdown;
+use Nfgarching\Mailer\Support\SecurityStatus;
 use Nfgarching\Textbot\Enhancers\EnhancerFactory;
 use Nfgarching\Textbot\Exceptions\TextEnhancementException;
 use Nfgarching\Textbot\Models\TextUsage;
@@ -38,7 +41,12 @@ use Throwable;
  * Öffnen:   Livewire.dispatch('nfmailer-open', { options: {...} })
  *           $this->dispatch('nfmailer-open', options: [...])
  * Seite:    route('nfmailer.compose', [...]) als Popup oder Tab (Query wie options)
+ * Entwurf:  Option 'draft' => ID öffnet einen gespeicherten Entwurf,
+ *           'duplicate' => ID legt eine Kopie (Entwurf oder versandte Mail) als neuen Entwurf an
  * Danach:   Event 'nfmailer-sent' mit { id } (ID des Protokolleintrags)
+ *
+ * Der Versand selbst liegt im MailDispatcher; das Modal sammelt nur den Inhalt
+ * (MailDraft), speichert ihn als Entwurf bzw. übergibt ihn zum Versand.
  */
 #[Layout('layout::popup')]
 class MailComposer extends Component
@@ -142,6 +150,29 @@ class MailComposer extends Component
     #[Locked]
     public bool $page = false;
 
+    /** Gespeicherter Entwurf (sent_mails, status 'draft'), null = noch nicht gespeichert */
+    #[Locked]
+    public ?int $draftId = null;
+
+    /** Version des Entwurfs beim Laden/Speichern – Schutz gegen Überschreiben aus einem anderen Fenster */
+    #[Locked]
+    public int $draftVersion = 0;
+
+    /** Fingerabdruck des zuletzt gespeicherten (bzw. geöffneten) Inhalts */
+    #[Locked]
+    public string $savedHash = '';
+
+    /** Uhrzeit der letzten Speicherung für die Anzeige im Footer */
+    public ?string $savedAt = null;
+
+    /** Konflikt beim Speichern: 'changed' (anderes Fenster) oder 'gone' (versendet/gelöscht) */
+    #[Locked]
+    public ?string $draftConflict = null;
+
+    /** Aus dem Entwurf entfernte, bereits gespeicherte Uploads – beim nächsten Speichern löschen */
+    #[Locked]
+    public array $discardedUploads = [];
+
     // ---------------------------------------------------------------- Öffnen
 
     /**
@@ -156,7 +187,7 @@ class MailComposer extends Component
             return;
         }
 
-        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'archive', 'signature', 'attachments', 'attachments_label']))
+        $options = collect(request()->only(['context', 'to', 'cc', 'bcc', 'subject', 'body', 'links', 'pin', 'encrypt', 'archive', 'signature', 'attachments', 'attachments_label', 'draft', 'duplicate']))
             ->map(fn ($v) => is_string($v) && json_validate($v) && is_array($decoded = json_decode($v, true)) ? $decoded : $v)
             ->all();
 
@@ -173,6 +204,14 @@ class MailComposer extends Component
         $this->resetExcept('page', 'mode', 'provider', 'aimodel');
         $this->resetValidation();
         unset($this->suggestions, $this->results);
+
+        // Gespeicherten Entwurf öffnen bzw. Kopie als neuen Entwurf anlegen
+        if (($id = $options['draft'] ?? $options['duplicate'] ?? null) && auth()->check()) {
+            $this->loadDraft((int) $id, copy: ! isset($options['draft']));
+            $this->dispatch('nfmailer-show');
+
+            return;
+        }
 
         $this->context = (array) ($options['context'] ?? []);
         $this->subject = (string) ($options['subject'] ?? '');
@@ -198,6 +237,9 @@ class MailComposer extends Component
             }
         }
         $this->attachmentsLabel = (string) ($options['attachments_label'] ?? '');
+
+        // Ausgangszustand gilt als „gespeichert“: Autosave erst nach einer Änderung
+        $this->savedHash = $this->currentHash();
 
         $this->dispatch('nfmailer-show');
     }
@@ -484,36 +526,9 @@ class MailComposer extends Component
     #[Computed]
     public function security(): array
     {
-        $smime = (array) config('nfmailer.smime', []);
-        $signs = ! empty($smime['certificate']) && ! empty($smime['key']);
-        $canEncrypt = (bool) ($smime['encrypt'] ?? false);
+        $status = SecurityStatus::for([...$this->to, ...$this->cc, ...$this->bcc]);
 
-        $emails = array_map(
-            fn ($r) => mb_strtolower($r['email']),
-            [...$this->to, ...$this->cc, ...$this->bcc],
-        );
-
-        $certs = [];
-        if ($canEncrypt) {
-            $store = app(CertificateStore::class);
-            foreach (array_unique($emails) as $e) {
-                $certs[$e] = $store->has($e);
-            }
-        }
-
-        $missing = [];
-        foreach (array_keys(array_filter($certs, fn ($ok) => ! $ok)) as $e) {
-            $missing[] = $e.' ('.app(CertificateStore::class)->unusableReason($e).')';
-        }
-
-        return [
-            'signs' => $signs,
-            'canEncrypt' => $canEncrypt,
-            'encryptPossible' => $canEncrypt && $emails && ! $missing,
-            'canLookup' => $canEncrypt && app(CertificateDirectory::class)->enabled(),
-            'missing' => $missing,
-            'certs' => $certs,
-        ];
+        return $status + ['canLookup' => $status['canEncrypt'] && app(CertificateDirectory::class)->enabled()];
     }
 
     /**
@@ -760,6 +775,11 @@ class MailComposer extends Component
             return;
         }
 
+        // Bereits gespeicherter Upload eines Entwurfs: Datei beim nächsten Speichern löschen
+        if (($this->attachments[$i]['origin'] ?? null) === 'upload') {
+            $this->discardedUploads[] = ['disk' => $this->attachments[$i]['disk'], 'path' => $this->attachments[$i]['path']];
+        }
+
         unset($this->attachments[$i]);
         $this->attachments = array_values($this->attachments);
     }
@@ -784,9 +804,8 @@ class MailComposer extends Component
 
     public function send(): void
     {
-        ($gate = config('nfmailer.gate'))
-            ? Gate::authorize($gate)
-            : abort_unless(auth()->check(), 403);
+        abort_unless(auth()->check(), 403);
+        Gate::authorize('create', SentMail::class);
 
         $this->notice = null;
         $this->addFree();
@@ -806,320 +825,296 @@ class MailComposer extends Component
             'body.required' => 'Bitte einen Text eingeben.',
         ]);
 
-        // Hochgeladene Dateien dauerhaft speichern
-        $files = $this->activeAttachments();
+        if ($this->draftId && $existing = SentMail::find($this->draftId)) {
+            Gate::authorize('send', $existing);
+        }
+
+        $this->storeUploads();
+        $store = app(DraftStore::class);
+
+        try {
+            $log = $store->claimForSending(
+                $this->currentDraft(),
+                $this->draftId,
+                $this->draftVersion ?: null,
+                auth()->id(),
+            );
+        } catch (DraftConflict $e) {
+            $this->handleConflict($e);
+
+            return;
+        }
+
+        $store->discardUploads($this->discardedUploads);
+        $this->discardedUploads = [];
+
+        // Ab hier ist der Datensatz kein Entwurf mehr
+        $this->draftId = null;
+        $this->draftVersion = 0;
+
+        $result = app(MailDispatcher::class)->dispatch($log);
+        $this->dispatch('nfmailer-drafts-changed');
+
+        if (! $result->ok) {
+            // Inhalt bleibt im Modal; das nächste Speichern legt einen neuen Entwurf an
+            $this->notice = $result->error;
+            $this->savedHash = '';
+
+            return;
+        }
+
+        $this->dispatch('nfmailer-sent', id: $result->log->id);
+
+        if ($result->error) {
+            $this->notice = $result->error;
+        }
+
+        if ($result->needsConfirmation()) {
+            // Modal offen lassen: PIN bzw. Passwörter müssen dem Empfänger mitgeteilt werden
+            $this->result = $result->toArray();
+
+            return;
+        }
+
+        $this->dispatch('nfmailer-hide');
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
+    }
+
+    /** Download-Portal verfügbar (nfgarching/share eingerichtet)? */
+    #[Computed]
+    public function portalAvailable(): bool
+    {
+        return app(MailDispatcher::class)->portalAvailable();
+    }
+
+    // ---------------------------------------------------------------- Entwürfe
+
+    /** Knopf „Entwurf speichern“ ($force: trotz Änderung in einem anderen Fenster) */
+    public function saveDraft(bool $force = false): void
+    {
+        $this->persistDraft($force, auto: false);
+    }
+
+    /** Automatisch (wire:poll, Schließen des Modals) – nur bei ungespeicherten Änderungen */
+    public function autosave(): void
+    {
+        if (! config('nfmailer.drafts.autosave', true) || $this->result || $this->draftConflict
+            || $this->currentHash() === $this->savedHash
+            || (! $this->draftId && $this->isBlank())) {
+            return;
+        }
+
+        $this->persistDraft(false, auto: true);
+    }
+
+    /** Nach Konflikt 'gone': Inhalt als neuen Entwurf sichern */
+    public function saveAsNewDraft(): void
+    {
+        $this->draftId = null;
+        $this->draftVersion = 0;
+        $this->persistDraft(false, auto: false);
+    }
+
+    /** Nach Konflikt 'changed': Fassung aus dem anderen Fenster laden (eigene Änderungen verwerfen) */
+    public function reloadDraft(): void
+    {
+        if ($this->draftId) {
+            $this->loadDraft($this->draftId);
+        }
+    }
+
+    /** Entwurf löschen und Modal schließen */
+    public function discardDraft(): void
+    {
+        abort_unless(auth()->check(), 403);
+
+        if ($this->draftId && $draft = SentMail::find($this->draftId)) {
+            Gate::authorize('delete', $draft);
+            app(DraftStore::class)->delete($draft);
+            $this->dispatch('nfmailer-drafts-changed');
+        }
+
+        $this->dispatch('nfmailer-hide');
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
+    }
+
+    /** Ungespeicherte Änderungen (für Anzeige und Rückfrage beim Schließen) */
+    #[Computed]
+    public function dirty(): bool
+    {
+        return $this->currentHash() !== $this->savedHash;
+    }
+
+    protected function persistDraft(bool $force, bool $auto): void
+    {
+        if (! auth()->check() || ! config('nfmailer.drafts.enabled', true)) {
+            return;
+        }
+
+        if ($this->draftId && $existing = SentMail::find($this->draftId)) {
+            Gate::authorize('update', $existing);
+        }
+
+        $this->storeUploads();
+        $store = app(DraftStore::class);
+
+        try {
+            $log = $store->save($this->currentDraft(), $this->draftId, $force ? null : $this->draftVersion, auth()->id());
+        } catch (DraftConflict $e) {
+            $this->handleConflict($e);
+
+            return;
+        }
+
+        $store->discardUploads($this->discardedUploads);
+        $this->discardedUploads = [];
+
+        $this->draftId = $log->id;
+        $this->draftVersion = $log->version;
+        $this->draftConflict = null;
+        $this->savedHash = $this->currentHash();
+        $this->savedAt = now()->timezone(config('app.timezone'))->format('H:i');
+
+        if (! $auto) {
+            $this->notice = null;
+        }
+
+        $this->dispatch('nfmailer-drafts-changed');
+    }
+
+    /**
+     * Entwurf laden ($copy = false) oder einen Entwurf bzw. eine versandte Mail als
+     * neuen Entwurf kopieren ($copy = true).
+     */
+    protected function loadDraft(int $id, bool $copy = false): void
+    {
+        $log = SentMail::find($id);
+
+        if (! $log) {
+            $this->notice = 'Der Entwurf ist nicht mehr vorhanden.';
+
+            return;
+        }
+
+        if ($copy) {
+            Gate::authorize('view', $log);
+            $log = app(DraftStore::class)->duplicate($log, auth()->id());
+            $this->dispatch('nfmailer-drafts-changed');
+        } elseif (! $log->isDraft()) {
+            $this->notice = 'Diese E-Mail wurde bereits versandt und kann nicht mehr bearbeitet werden.';
+
+            return;
+        } else {
+            Gate::authorize('update', $log);
+        }
+
+        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
+        $this->resetValidation();
+        $this->applyDraft(MailDraft::fromLog($log));
+
+        $this->draftId = $log->id;
+        $this->draftVersion = $log->version;
+        $this->savedHash = $this->currentHash();
+        $this->savedAt = $log->updated_at?->timezone(config('app.timezone'))->format('d.m. H:i');
+    }
+
+    protected function applyDraft(MailDraft $draft): void
+    {
+        $this->to = $draft->to;
+        $this->cc = $draft->cc;
+        $this->bcc = $draft->bcc;
+        $this->subject = $draft->subject;
+        $this->body = $draft->body;
+        $this->context = $draft->context;
+
+        $this->asLinks = (bool) $draft->option('links');
+        $this->usePin = (bool) $draft->option('pin');
+        $this->pinByMail = (bool) $draft->option('pin_by_mail');
+        $this->encrypt = (bool) $draft->option('encrypt');
+        $this->archive = (bool) $draft->option('archive');
+        $this->useSignature = (bool) $draft->option('signature');
+        $this->attachmentsLabel = (string) $draft->option('attachments_label');
+        $this->showCopies = (bool) $draft->option('show_copies') || $this->cc || $this->bcc;
+
+        // Inzwischen gelöschte Dateien nicht anbieten, sondern melden
+        $missing = [];
+        $this->attachments = [];
+        foreach ($draft->attachments as $a) {
+            if (Storage::disk($a['disk'])->exists($a['path'])) {
+                $this->attachments[] = $a + ['active' => true];
+            } elseif ($a['active'] ?? true) {
+                $missing[] = $a['name'];
+            }
+        }
+
+        if ($missing) {
+            $this->notice = 'Nicht mehr vorhanden und daher entfernt: '.implode(', ', $missing);
+        }
+    }
+
+    /** Inhalt des Modals als MailDraft */
+    protected function currentDraft(): MailDraft
+    {
+        return new MailDraft(
+            to: $this->to,
+            cc: $this->cc,
+            bcc: $this->bcc,
+            subject: $this->subject,
+            body: $this->body,
+            context: $this->context,
+            attachments: $this->attachments,
+            options: [
+                'links' => $this->asLinks,
+                'pin' => $this->usePin,
+                'pin_by_mail' => $this->pinByMail,
+                'encrypt' => $this->encrypt,
+                'archive' => $this->archive,
+                'signature' => $this->useSignature,
+                'attachments_label' => $this->attachmentsLabel,
+                'show_copies' => $this->showCopies,
+            ],
+        );
+    }
+
+    /** Nichts eingegeben: keine Empfänger, kein Betreff, kein Text, keine eigenen Anhänge */
+    protected function isBlank(): bool
+    {
+        return ! $this->to && ! $this->cc && ! $this->bcc && ! $this->uploads
+            && trim($this->subject) === '' && trim($this->body) === ''
+            && ! array_filter($this->attachments, fn ($a) => ($a['origin'] ?? null) !== 'preset');
+    }
+
+    protected function currentHash(): string
+    {
+        return $this->currentDraft()->hash().':'.count($this->uploads);
+    }
+
+    /**
+     * Temporäre Livewire-Uploads dauerhaft ablegen (Livewire löscht sie nach 24 Stunden)
+     * und als Anhang mit origin 'upload' übernehmen.
+     */
+    protected function storeUploads(): void
+    {
         $disk = config('nfmailer.uploads.disk', 'local');
 
         foreach ($this->uploads as $upload) {
-            $files[] = [
+            $this->attachments[] = [
                 'disk' => $disk,
                 'path' => $upload->store(config('nfmailer.uploads.directory', 'nfmailer/uploads'), $disk),
                 'name' => $upload->getClientOriginalName(),
                 'size' => $upload->getSize(),
                 'origin' => 'upload',
+                'active' => true,
             ];
         }
 
-        $inner = config('nfmailer.mailer') ?: config('mail.default');
-        $queue = (bool) config('nfmailer.queue', false);
-        unset($this->security);
-        $security = $this->security;
-        $encrypt = $this->encrypt && $security['encryptPossible'];
-
-        // Download-Links über das Download-Portal (nfgarching/share): eigene Mail je Empfänger
-        if ($this->asLinks && $files && $this->portalAvailable()) {
-            $this->sendViaPortal($files, $security, $encrypt, $inner, $queue);
-
-            return;
-        }
-        $pin = ($this->asLinks && $files && $this->usePin) ? MailLink::generatePin() : null;
-
-        $log = SentMail::create([
-            'user_id' => auth()->id(),
-            'status' => 'pending',
-            'mailer' => $inner,
-            'subject' => $this->subject,
-            'body' => $this->body,
-            'to' => $this->to,
-            'cc' => $this->cc,
-            'bcc' => $this->bcc,
-            'attachments' => $files,
-            'as_links' => $this->asLinks && $files,
-            'signed' => $security['signs'],
-            'encrypted' => $encrypt,
-            'pin' => $pin,
-            'archive' => config('nfmailer.archive.enabled', false) && $this->archive,
-            'context' => $this->context,
-            'context_key' => SentMail::contextKey($this->context),
-        ]);
-
-        $links = [];
-        if ($this->asLinks && $files) {
-            foreach ($files as $f) {
-                $link = MailLink::issue($f, $log->id, $pin);
-                $links[] = [
-                    'name' => $f['name'],
-                    'url' => $link->url(),
-                    'expires' => $link->expires_at?->format('d.m.Y'),
-                ];
-            }
-        }
-
-        $mail = (new ComposedMail(
-            mailSubject: $this->subject,
-            text: $this->body,
-            files: $links ? [] : $files,
-            links: $links,
-            signature: $this->signature(),
-            encrypt: $encrypt,
-            pinNote: $pin ? 'Zum Abruf benötigen Sie eine PIN, die Sie getrennt von dieser E-Mail erhalten.' : null,
-        ))
-            ->to($this->addressList($this->to))
-            ->cc($this->addressList($this->cc))
-            ->bcc($this->addressList($this->bcc))
-            ->forLog($log);
-
-        try {
-            if ($queue) {
-                // Status vorher setzen: Der Listener RecordSentMail zieht ihn nach dem
-                // Versand auf „sent“ – bei QUEUE_CONNECTION=sync noch während queue().
-                $log->update(['status' => 'queued']);
-                Mail::mailer('nfmailer')->queue($mail);
-            } else {
-                $sent = Mail::mailer('nfmailer')->send($mail);
-                $log->update([
-                    'status' => 'sent',
-                    'sent_at' => now(),
-                    'message_id' => $sent?->getMessageId(),
-                ]);
-            }
-        } catch (Throwable $e) {
-            report($e);
-            $log->update(['status' => 'failed', 'error' => $e->getMessage()]);
-            $this->notice = 'Versand fehlgeschlagen: '.$e->getMessage();
-
-            return;
-        }
-
-        $pinMailed = false;
-        if ($pin && $this->pinByMail) {
-            $pinMailed = $this->sendPinMail($pin);
-        }
-
-        $this->dispatch('nfmailer-sent', id: $log->id);
-
-        if ($pin) {
-            // Modal offen lassen: Die PIN muss dem Empfänger mitgeteilt werden
-            $this->result = [
-                'id' => $log->id,
-                'pin' => $pin,
-                'pinMailed' => $pinMailed,
-                'signed' => $security['signs'],
-                'encrypted' => $encrypt,
-            ];
-
-            return;
-        }
-
-        $this->dispatch('nfmailer-hide');
-        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
+        $this->uploads = [];
     }
 
-    // ---------------------------------------------------------------- Download-Portal
-
-    /**
-     * Download-Links über das Download-Portal statt der eigenen Links, wenn
-     * nfgarching/share installiert und eingerichtet ist (abschaltbar mit
-     * nfmailer.links.portal = false).
-     */
-    #[Computed]
-    public function portalAvailable(): bool
+    protected function handleConflict(DraftConflict $e): void
     {
-        $client = 'Nfgarching\\Share\\Client\\PortalClient';
-
-        if (! config('nfmailer.links.portal', true) || ! class_exists($client)) {
-            return false;
-        }
-
-        try {
-            return app($client)->isConfigured();
-        } catch (Throwable) {
-            return false;
-        }
-    }
-
-    /**
-     * Versand über das Portal: Die Dateien werden einmal bereitgestellt, jeder
-     * Empfänger (An, CC und BCC) bekommt einen eigenen Link und eine eigene
-     * E-Mail. So lässt sich der Abruf je Person nachvollziehen und sperren;
-     * dafür sehen die Empfänger einander nicht.
-     */
-    protected function sendViaPortal(array $files, array $security, bool $encrypt, string $inner, bool $queue): void
-    {
-        $recipients = collect([...$this->to, ...$this->cc, ...$this->bcc])
-            ->unique(fn ($r) => strtolower($r['email']))
-            ->values();
-
-        $log = SentMail::create([
-            'user_id' => auth()->id(),
-            'status' => 'pending',
-            'mailer' => $inner,
-            'subject' => $this->subject,
-            'body' => $this->body,
-            'to' => $this->to,
-            'cc' => $this->cc,
-            'bcc' => $this->bcc,
-            'attachments' => $files,
-            'as_links' => true,
-            'signed' => $security['signs'],
-            'encrypted' => $encrypt,
-            'pin' => null,
-            'archive' => config('nfmailer.archive.enabled', false) && $this->archive,
-            'context' => $this->context,
-            'context_key' => SentMail::contextKey($this->context),
-        ]);
-
-        try {
-            $result = app('Nfgarching\\Share\\Services\\ShareService')->share([
-                'context' => $this->context,
-                'subject' => $this->subject,
-                'expires_at' => now()->addDays((int) config('nfmailer.links.expires_days', 14))->endOfDay(),
-                'max_downloads' => (int) (config('nfmailer.links.max_downloads') ?: config('nfshare.defaults.max_downloads', 5)),
-                'recipients' => $recipients->map(fn ($r) => [
-                    'email' => $r['email'],
-                    'name' => $r['name'] ?? null,
-                    'password' => $this->usePin,
-                ])->all(),
-                'files' => array_map(fn ($f) => ['disk' => $f['disk'], 'path' => $f['path'], 'name' => $f['name'], 'size' => $f['size'] ?? 0], $files),
-            ], auth()->id());
-        } catch (Throwable $e) {
-            report($e);
-            $message = method_exists($e, 'userMessage') ? $e->userMessage() : $e->getMessage();
-            $log->update(['status' => 'failed', 'error' => $message]);
-            $this->notice = 'Bereitstellung im Download-Portal fehlgeschlagen: '.$message;
-
-            return;
-        }
-
-        $shipment = $result->shipment;
-        $names = collect($files)->pluck('name');
-        $label = $names->count() === 1 ? $names->first() : $names->count().' Dokumente ('.$names->take(3)->implode(', ').($names->count() > 3 ? ', …' : '').')';
-        $passwords = [];
-        $errors = [];
-
-        foreach ($shipment->recipients as $recipient) {
-            $link = $result->links[$recipient->id] ?? null;
-
-            if ($link === null) {
-                $errors[] = $recipient->email.': kein Link';
-
-                continue;
-            }
-
-            $address = ['email' => $recipient->email, 'name' => (string) ($recipient->name ?? '')];
-
-            $mail = (new ComposedMail(
-                mailSubject: $this->subject,
-                text: $this->body,
-                files: [],
-                links: [['name' => $label, 'url' => $link['url'], 'expires' => $shipment->expires_at?->timezone(config('app.timezone'))->format('d.m.Y')]],
-                signature: $this->signature(),
-                encrypt: $encrypt,
-                pinNote: $link['password'] ? 'Zum Abruf benötigen Sie ein Passwort, das Sie getrennt von dieser E-Mail erhalten.' : null,
-            ))->to([$address])->forLog($log);
-
-            try {
-                $queue ? Mail::mailer('nfmailer')->queue($mail) : Mail::mailer('nfmailer')->send($mail);
-            } catch (Throwable $e) {
-                report($e);
-                $errors[] = $recipient->email.': '.$e->getMessage();
-
-                continue;
-            }
-
-            if ($link['password']) {
-                $passwords[] = [
-                    'email' => $recipient->email,
-                    'name' => $recipient->name,
-                    'password' => $link['password'],
-                    'mailed' => $this->pinByMail && $this->sendPasswordMail($address, $link['password']),
-                ];
-            }
-        }
-
-        $log->update($errors
-            ? ['status' => 'failed', 'error' => implode('; ', $errors)]
-            : ['status' => $queue ? 'queued' : 'sent', 'sent_at' => $queue ? null : now()]);
-
-        $this->dispatch('nfmailer-sent', id: $log->id);
-
-        if ($errors) {
-            $this->notice = 'Nicht an alle versandt: '.implode('; ', $errors);
-        }
-
-        if ($passwords || $errors) {
-            $this->result = [
-                'id' => $log->id,
-                'pin' => null,
-                'portal' => true,
-                'passwords' => $passwords,
-                'pinMailed' => false,
-                'signed' => $security['signs'],
-                'encrypted' => $encrypt,
-            ];
-
-            return;
-        }
-
-        $this->dispatch('nfmailer-hide');
-        $this->resetExcept('page', 'mode', 'provider', 'aimodel');
-    }
-
-    /** Passwort für den Portal-Link in einer eigenen E-Mail an einen Empfänger */
-    protected function sendPasswordMail(array $address, string $password): bool
-    {
-        $text = "Guten Tag,\n\nfür die Dokumente, die ich Ihnen soeben in einer separaten E-Mail über unser "
-            ."Dokumentenportal bereitgestellt habe, lautet das Passwort:\n\n    {$password}\n\n"
-            .'Groß- und Kleinschreibung sowie Bindestriche spielen bei der Eingabe keine Rolle.'
-            .(($sig = $this->signature()) ? "\n\n--\n{$sig}" : '');
-
-        try {
-            Mail::mailer('nfmailer')->raw($text, fn ($m) => $m->to($address['email'], $address['name'])
-                ->subject('Passwort für Ihren Dokumentenabruf'));
-
-            return true;
-        } catch (Throwable $e) {
-            report($e);
-
-            return false;
-        }
-    }
-
-    /** Zweite E-Mail nur mit der PIN (getrennter Versand, ohne Bezug zum Inhalt im Betreff) */
-    protected function sendPinMail(string $pin): bool
-    {
-        $text = "Guten Tag,\n\nfür die Dokumente, die ich Ihnen soeben in einer separaten E-Mail zum Download "
-            ."bereitgestellt habe, lautet die PIN:\n\n    {$pin}\n\n"
-            .'Die PIN ist für alle Dokumente dieser E-Mail gültig.'
-            .(($sig = $this->signature()) ? "\n\n--\n{$sig}" : '');
-
-        try {
-            // Symfony\Address verlangt einen String als Namen (null führt zu TypeError)
-            $list = fn (array $rs) => array_map(fn ($r) => ['email' => $r['email'], 'name' => (string) ($r['name'] ?? '')], $rs);
-
-            Mail::mailer('nfmailer')->raw($text, function ($m) use ($list) {
-                $m->to($list($this->to))
-                    ->cc($list($this->cc))
-                    ->bcc($list($this->bcc))
-                    ->subject('PIN für Ihren Dokumentenabruf');
-            });
-
-            return true;
-        } catch (Throwable $e) {
-            report($e);
-
-            return false;
-        }
+        $this->draftConflict = $e->reason;
+        $this->notice = $e->getMessage();
     }
 
     /**

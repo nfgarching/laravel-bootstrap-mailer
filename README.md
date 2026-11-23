@@ -1,6 +1,6 @@
 # nfgarching/mailer
 
-E-Mail-Versand mit komfortablem Empfänger-Modal (Livewire 3, Bootstrap 5.3).
+E-Mail-Versand mit komfortablem Empfänger-Modal (Livewire 4, Bootstrap 5.3).
 
 - **An / CC / BCC** als Chip-Felder; das aktive Feld ist blau umrandet
 - **Beteiligte der Akte** erscheinen sofort, ohne Suche
@@ -10,6 +10,7 @@ E-Mail-Versand mit komfortablem Empfänger-Modal (Livewire 3, Bootstrap 5.3).
   (`Müller, Hans <h@x.de>; info@y.de`), Backspace löscht den letzten Chip
 - Chip-Menü: in anderes Feld verschieben; eine Adresse steht nie doppelt
 - **Anhänge** (übergeben oder hochgeladen) oder wahlweise **Download-Links** mit Ablaufdatum und Abrufzähler
+- **Entwürfe**: speichern, automatisch sichern, später weiterschreiben – siehe [5a. Entwürfe](#5a-entwürfe)
 - **Versandprotokoll** in `sent_mails` (Download-Links in `sent_mails_links`), verschlüsselt gespeichert
 - **Sicherheit**: TLS-Pflicht, S/MIME-Signatur und -Verschlüsselung, Download-Links mit PIN – siehe [7. Sicherheit](#7-sicherheit)
 
@@ -128,6 +129,8 @@ Alle Optionen:
 | `links`       | bool                                      | Schalter „Download-Link statt Anhang“ vorbelegen |
 | `pin`         | bool                                      | „Download mit PIN schützen“ vorbelegen (Standard: `links.pin_default`) |
 | `encrypt`     | bool                                      | S/MIME-Verschlüsselung, falls möglich (Standard: `true`) |
+| `draft`       | int                                       | Gespeicherten Entwurf öffnen (alle anderen Optionen werden ignoriert) |
+| `duplicate`   | int                                       | Entwurf oder versandte Mail als neuen Entwurf kopieren und öffnen |
 
 Nach erfolgreichem Versand feuert die Komponente `nfmailer-sent` mit der Protokoll-ID:
 
@@ -194,11 +197,72 @@ $mail->pin;     // PIN der Download-Links (falls vergeben)
 $mail->signed;  $mail->encrypted;
 ```
 
-`status`: `sent`, `queued`, `failed` (mit `error`).
+`status`: `draft`, `pending`, `queued`, `sent`, `failed` (mit `error`).
 
 Betreff, Text, Empfänger, Anhangsliste und PIN liegen **verschlüsselt** in der
 Datenbank (Laravel-Cast `encrypted`, Schlüssel = `APP_KEY`). Deshalb ist keine
 SQL-Suche über diese Felder möglich – gefiltert wird über `context_key`.
+
+## 5a. Entwürfe
+
+Ein Entwurf ist ein Eintrag in `sent_mails` mit `status = draft`. Beim Senden wird
+derselbe Eintrag zum Protokolleintrag; es entsteht kein zweiter Datensatz.
+Betreff, Text, Empfänger und Anhänge sind wie im Protokoll verschlüsselt.
+
+- **Speichern**: Knopf „Entwurf“ im Fuß des Modals. Automatisch alle
+  `drafts.autosave_seconds` Sekunden (Standard 30), solange das Modal offen ist
+  und sich seit dem letzten Speichern etwas geändert hat, sowie beim Schließen.
+  Eine leere Mail wird nicht gespeichert.
+- **Uploads** werden beim ersten Speichern dauerhaft abgelegt (Livewire löscht
+  temporäre Uploads nach 24 Stunden). PIN, Download-Links und Portal-Freigaben
+  entstehen erst beim Versand.
+- **Öffnen**: Seite `route('nfmailer.drafts')` (Navbar-Symbol mit Anzahl) oder
+  `Livewire.dispatch('nfmailer-open', { options: { draft: ID } })`. Inzwischen
+  gelöschte Anhänge werden beim Öffnen entfernt und gemeldet.
+- **Zwei Fenster**: Jeder Entwurf hat eine Versionsnummer. Wurde er inzwischen
+  anderswo gespeichert, erscheint ein Hinweis mit „Andere Fassung laden“ oder
+  „Meine Fassung speichern“ – nichts wird still überschrieben.
+- **Duplizieren**: in der Liste oder mit der Option `duplicate` (auch für eine
+  versandte Mail, „als neue Mail“). Hochgeladene Dateien werden dabei kopiert.
+- **Verwerfen** (Papierkorb im Modal bzw. in der Liste) löscht den Entwurf und
+  seine hochgeladenen Dateien; Dokumente der Akte bleiben unberührt.
+
+Liste in der Aktenansicht der Anwendung:
+
+```blade
+<livewire:nf-mail-drafts :context="['akte' => $akte->id]" compact />
+```
+
+```php
+SentMail::drafts()->forContext(['akte' => $akte->id])->count();
+```
+
+**Rechte** (`SentMailPolicy`): Entwürfe sieht und bearbeitet nur der Verfasser;
+mit `NFMAILER_DRAFTS_SHARED=true` alle angemeldeten User. Senden zusätzlich nur
+mit dem Gate aus `nfmailer.gate`, falls gesetzt. Eigene Regeln (z. B. Zugriff auf
+die Akte) mit `Gate::policy(SentMail::class, MeinePolicy::class)` im
+`AppServiceProvider`.
+
+| Einstellung | Standard | Bedeutung |
+|---|---|---|
+| `drafts.enabled` (`NFMAILER_DRAFTS`) | `true` | Entwürfe überhaupt |
+| `drafts.autosave` (`NFMAILER_DRAFTS_AUTOSAVE`) | `true` | automatisch speichern |
+| `drafts.autosave_seconds` | `30` | Abstand (mindestens 10) |
+| `drafts.shared` (`NFMAILER_DRAFTS_SHARED`) | `false` | Entwürfe für alle sichtbar |
+| `prune.drafts_after_days` | `90` | unveränderte Entwürfe löschen (`null` = nie) |
+
+**Für Entwickler**: Der Versand liegt im Dienst `MailDispatcher::dispatch(SentMail $log)`,
+das Speichern in `DraftStore`; der Inhalt wird als `MailDraft` übergeben. Damit
+lassen sich Mails auch ohne Modal versenden (z. B. aus einem Job):
+
+```php
+$log = app(DraftStore::class)->claimForSending(new MailDraft(
+    to: [['email' => 'mandant@example.de', 'name' => 'Mandant']],
+    subject: 'Ihre Unterlagen', body: 'Guten Tag, …', context: ['akte' => 123],
+), null, null, auth()->id());
+
+$result = app(MailDispatcher::class)->dispatch($log);   // ->ok, ->pin, ->error
+```
 
 ## 6. Hinweise
 
@@ -376,9 +440,11 @@ Die Empfänger sehen einander dabei nicht. Abruf, Sperre und Widerruf je Person 
 Schedule::command('nfmailer:prune')->daily();
 ```
 
-Entfernt Links `prune.links_after_days` Tage nach Ablauf; hochgeladene Dateien
-nur, wenn `prune.uploads_after_days` gesetzt ist (Standard: behalten, als
-Nachweis des Versands).
+Entfernt Links `prune.links_after_days` Tage nach Ablauf, Entwürfe, die
+`prune.drafts_after_days` Tage nicht geändert wurden (samt ihren Uploads), und
+hochgeladene Dateien nur, wenn `prune.uploads_after_days` gesetzt ist (Standard:
+behalten, als Nachweis des Versands). Dateien, die ein Entwurf noch nutzt,
+bleiben immer erhalten.
 
 ### Wichtig: APP_KEY
 

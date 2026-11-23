@@ -207,10 +207,24 @@ return [
         'portal' => env('NFMAILER_LINKS_PORTAL', true),
     ],
 
+    /*
+    | Entwürfe: „Entwurf speichern“ im Modal, automatisches Speichern nach Änderungen,
+    | Liste unter route('nfmailer.drafts'). Gespeichert in sent_mails (status 'draft'),
+    | Betreff, Text, Empfänger und Anhänge verschlüsselt wie das Protokoll.
+    */
+    'drafts' => [
+        'enabled' => (bool) env('NFMAILER_DRAFTS', true),
+        'autosave' => (bool) env('NFMAILER_DRAFTS_AUTOSAVE', true),
+        'autosave_seconds' => 30,
+        // false = Entwürfe sieht und bearbeitet nur der Verfasser; true = alle angemeldeten User
+        'shared' => (bool) env('NFMAILER_DRAFTS_SHARED', false),
+    ],
+
     // php artisan nfmailer:prune (z. B. täglich im Scheduler)
     'prune' => [
         'links_after_days' => 90,     // abgelaufene/gesperrte Links so lange nach Ablauf aufheben
         'uploads_after_days' => null,   // hochgeladene Dateien löschen; null = behalten (Nachweis)
+        'drafts_after_days' => 90,     // unveränderte Entwürfe samt Uploads löschen; null = nie
     ],
 
     'route_prefix' => 'nfmailer',

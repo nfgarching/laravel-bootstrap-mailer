@@ -5,6 +5,7 @@ namespace Nfgarching\Mailer\Console;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use Nfgarching\Mailer\Models\MailLink;
+use Nfgarching\Mailer\Services\DraftStore;
 
 /**
  * Datensparsamkeit: entfernt alte Download-Links und (optional) alte Uploads.
@@ -15,7 +16,7 @@ class PruneCommand extends Command
 {
     protected $signature = 'nfmailer:prune {--dry-run : Nur anzeigen, nichts löschen}';
 
-    protected $description = 'Abgelaufene Download-Links und alte Uploads entfernen';
+    protected $description = 'Abgelaufene Download-Links, alte Entwürfe und alte Uploads entfernen';
 
     public function handle(): int
     {
@@ -34,18 +35,26 @@ class PruneCommand extends Command
             $this->line(($dry ? 'Würde ' : '')."{$count} Download-Link(s) entfernen".($dry ? '.' : ' – entfernt.'));
         }
 
+        // Entwürfe (vor den Uploads, damit deren Dateien mit ihnen gehen)
+        $days = config('nfmailer.prune.drafts_after_days');
+        if ($days !== null) {
+            $count = app(DraftStore::class)->prune((int) $days, $dry);
+            $this->line(($dry ? 'Würde ' : '')."{$count} Entwurf/Entwürfe löschen (älter als {$days} Tage)".($dry ? '.' : ' – gelöscht.'));
+        }
+
         // Uploads
         $days = config('nfmailer.prune.uploads_after_days');
         if ($days !== null) {
             $disk = Storage::disk(config('nfmailer.uploads.disk', 'local'));
             $cutoff = now()->subDays((int) $days)->getTimestamp();
 
-            // Dateien, auf die noch ein gültiger Link zeigt, bleiben erhalten
+            // Dateien, auf die noch ein gültiger Link zeigt oder die ein Entwurf nutzt, bleiben erhalten
             $active = MailLink::query()
                 ->whereNull('revoked_at')
                 ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
                 ->pluck('path')
-                ->flip();
+                ->flip()
+                ->all() + app(DraftStore::class)->uploadsInUse();
 
             $deleted = 0;
             foreach ($disk->allFiles(config('nfmailer.uploads.directory', 'nfmailer/uploads')) as $file) {

@@ -15,6 +15,7 @@ Route::middleware(['web', 'auth'])
     ->prefix(config('nfmailer.route_prefix', 'nfmailer'))
     ->group(function () {
         Route::view('favorites', 'nfmailer::pages.favorites')->name('nfmailer.favorites');
+        Route::view('drafts', 'nfmailer::pages.drafts')->name('nfmailer.drafts');
     });
 
 // Öffentlich: Empfänger haben kein Login. Schutz über 48-stelliges Zufallstoken

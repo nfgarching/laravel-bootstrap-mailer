@@ -19,7 +19,17 @@
 
 <div class="modal-body">
     @if ($notice)
-        <div class="alert alert-danger py-2">{{ $notice }}</div>
+        <div class="alert {{ $draftConflict ? 'alert-warning' : 'alert-danger' }} py-2 d-flex flex-wrap align-items-center gap-2">
+            <span class="me-auto">{{ $notice }}</span>
+            @if ($draftConflict === 'changed')
+                <button type="button" class="btn btn-sm btn-outline-secondary" wire:click="reloadDraft"
+                    wire:confirm="Die Fassung aus dem anderen Fenster laden? Ihre Änderungen hier gehen verloren.">
+                    Andere Fassung laden</button>
+                <button type="button" class="btn btn-sm btn-warning" wire:click="saveDraft(true)">Meine Fassung speichern</button>
+            @elseif ($draftConflict === 'gone')
+                <button type="button" class="btn btn-sm btn-warning" wire:click="saveAsNewDraft">Als neuen Entwurf speichern</button>
+            @endif
+        </div>
     @endif
 
     @if ($result)
@@ -40,3 +50,8 @@
 <div class="modal-footer">
     @include('nfmailer::livewire.mail-composer.footer')
 </div>
+
+{{-- Entwurf automatisch speichern (nur sichtbar = Modal offen bzw. Seite aktiv; nur bei Änderungen) --}}
+@if (config('nfmailer.drafts.enabled', true) && config('nfmailer.drafts.autosave', true) && ! $result)
+    <div class="d-none" wire:poll.{{ max(10, (int) config('nfmailer.drafts.autosave_seconds', 30)) }}s.visible="autosave"></div>
+@endif
